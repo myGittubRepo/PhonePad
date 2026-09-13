@@ -11,6 +11,8 @@ import android.bluetooth.BluetoothProfile
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
@@ -55,6 +57,7 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "PhonePad"
         private const val TAP_DURATION_MS = 180L
         private const val TAP_MOVEMENT_DP = 10f
+        private const val DRAG_HOLD_MS = 350L
     }
 
     // Milestone 0 diagnostics
@@ -81,6 +84,13 @@ class MainActivity : ComponentActivity() {
     private var touchDownY = 0f
     private var tapMovementThresholdPx = 0f
     private var tapEligible = false
+
+    // Milestone 4 drag
+    private var isDragging = false
+    private var dragEligible = false
+    private var fingerDown = false
+    private val handler = Handler(Looper.getMainLooper())
+    private val dragTriggerRunnable = Runnable { tryActivateDrag() }
 
     // Mouse HID report descriptor: 3 buttons, relative X, relative Y
     private val mouseDescriptor = byteArrayOf(
@@ -226,6 +236,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        handler.removeCallbacks(dragTriggerRunnable)
+        if (isDragging) {
+            releaseLeftButton()
+            isDragging = false
+        }
         hidDevice?.let { hid ->
             Log.d(TAG, "Closing HID profile proxy")
             try {
@@ -332,6 +347,13 @@ class MainActivity : ComponentActivity() {
 
         if (event.pointerCount > 1) {
             tapEligible = false
+            dragEligible = false
+            handler.removeCallbacks(dragTriggerRunnable)
+            if (isDragging) {
+                Log.d(TAG, "Drag cancelled: multi-touch detected")
+                releaseLeftButton()
+                isDragging = false
+            }
         }
 
         if (event.pointerCount != 1) return false
@@ -344,6 +366,10 @@ class MainActivity : ComponentActivity() {
                 touchDownX = event.x
                 touchDownY = event.y
                 tapEligible = true
+                dragEligible = true
+                isDragging = false
+                fingerDown = true
+                handler.postDelayed(dragTriggerRunnable, DRAG_HOLD_MS)
                 Log.d(TAG, "Touch started at (${event.x}, ${event.y})")
                 return true
             }
@@ -353,12 +379,17 @@ class MainActivity : ComponentActivity() {
                 previousX = event.x
                 previousY = event.y
 
-                if (tapEligible) {
+                if (!isDragging) {
                     val distX = event.x - touchDownX
                     val distY = event.y - touchDownY
                     val distance = sqrt(distX * distX + distY * distY)
+
                     if (distance > tapMovementThresholdPx) {
-                        tapEligible = false
+                        if (tapEligible) tapEligible = false
+                        if (dragEligible) {
+                            dragEligible = false
+                            handler.removeCallbacks(dragTriggerRunnable)
+                        }
                     }
                 }
 
@@ -366,34 +397,66 @@ class MainActivity : ComponentActivity() {
                 val clampedY = dy.toInt().coerceIn(-127, 127)
 
                 if (clampedX != 0 || clampedY != 0) {
-                    sendMouseReport(clampedX, clampedY)
+                    if (isDragging) {
+                        sendMouseReport(0x01, clampedX, clampedY)
+                    } else {
+                        sendMouseReport(0x00, clampedX, clampedY)
+                    }
                 }
                 return true
             }
             MotionEvent.ACTION_UP -> {
-                val duration = SystemClock.uptimeMillis() - touchDownTime
+                handler.removeCallbacks(dragTriggerRunnable)
+                fingerDown = false
 
-                when {
-                    !tapEligible -> {
-                        Log.d(TAG, "Tap suppressed: movement threshold exceeded during gesture")
-                    }
-                    duration > TAP_DURATION_MS -> {
-                        Log.d(TAG, "Tap suppressed: duration ${duration}ms > ${TAP_DURATION_MS}ms")
-                    }
-                    else -> {
-                        Log.d(TAG, "Tap detected: duration=${duration}ms")
-                        sendLeftClick()
+                if (isDragging) {
+                    Log.d(TAG, "Drag ended")
+                    releaseLeftButton()
+                    isDragging = false
+                } else {
+                    val duration = SystemClock.uptimeMillis() - touchDownTime
+                    when {
+                        !tapEligible -> {
+                            Log.d(TAG, "Tap suppressed: movement threshold exceeded during gesture")
+                        }
+                        duration > TAP_DURATION_MS -> {
+                            Log.d(TAG, "Tap suppressed: duration ${duration}ms > ${TAP_DURATION_MS}ms")
+                        }
+                        else -> {
+                            Log.d(TAG, "Tap detected: duration=${duration}ms")
+                            sendLeftClick()
+                        }
                     }
                 }
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                handler.removeCallbacks(dragTriggerRunnable)
+                fingerDown = false
+                if (isDragging) {
+                    Log.d(TAG, "Drag cancelled")
+                    releaseLeftButton()
+                    isDragging = false
+                }
                 tapEligible = false
+                dragEligible = false
                 Log.d(TAG, "Touch cancelled")
                 return true
             }
         }
         return false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun tryActivateDrag() {
+        if (!fingerDown || !dragEligible || isDragging) return
+        if (connectedDevice == null || hidDevice == null) return
+
+        isDragging = true
+        tapEligible = false
+        dragEligible = false
+        Log.d(TAG, "Drag activated after ${DRAG_HOLD_MS}ms hold")
+        sendMouseReport(0x01, 0, 0)
     }
 
     @SuppressLint("MissingPermission")
@@ -413,19 +476,31 @@ class MainActivity : ComponentActivity() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun sendMouseReport(dx: Int, dy: Int) {
+    private fun releaseLeftButton() {
+        val hid = hidDevice ?: return
+        val device = connectedDevice ?: return
+
+        val release = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val result = hid.sendReport(device, 0, release)
+        if (!result) {
+            Log.w(TAG, "releaseLeftButton failed")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendMouseReport(buttons: Int, dx: Int, dy: Int) {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
 
         val report = byteArrayOf(
-            0x00.toByte(),
+            buttons.toByte(),
             dx.toByte(),
             dy.toByte()
         )
 
         val result = hid.sendReport(device, 0, report)
         if (!result) {
-            Log.w(TAG, "sendReport failed: dx=$dx, dy=$dy")
+            Log.w(TAG, "sendReport failed: buttons=$buttons, dx=$dx, dy=$dy")
         }
     }
 }
@@ -517,7 +592,7 @@ fun PhonePadScreen(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isConnected) "Move one finger to control cursor\nTap to click"
+                text = if (isConnected) "Move one finger to control cursor\nTap to click\nHold to drag"
                        else "Not connected",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
