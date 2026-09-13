@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
     // Milestone 2 touch tracking
     private var previousX = 0f
     private var previousY = 0f
+    private var previousEventTime = 0L
 
     // Milestone 3 tap detection
     private var touchDownTime = 0L
@@ -362,6 +363,7 @@ class MainActivity : ComponentActivity() {
             MotionEvent.ACTION_DOWN -> {
                 previousX = event.x
                 previousY = event.y
+                previousEventTime = event.eventTime
                 touchDownTime = SystemClock.uptimeMillis()
                 touchDownX = event.x
                 touchDownY = event.y
@@ -376,8 +378,10 @@ class MainActivity : ComponentActivity() {
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.x - previousX
                 val dy = event.y - previousY
+                val dtMs = event.eventTime - previousEventTime
                 previousX = event.x
                 previousY = event.y
+                previousEventTime = event.eventTime
 
                 if (!isDragging) {
                     val distX = event.x - touchDownX
@@ -393,14 +397,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val clampedX = dx.toInt().coerceIn(-127, 127)
-                val clampedY = dy.toInt().coerceIn(-127, 127)
+                val (accX, accY) = applyAcceleration(dx, dy, dtMs)
 
-                if (clampedX != 0 || clampedY != 0) {
+                if (accX != 0 || accY != 0) {
                     if (isDragging) {
-                        sendMouseReport(0x01, clampedX, clampedY)
+                        sendMouseReport(0x01, accX, accY)
                     } else {
-                        sendMouseReport(0x00, clampedX, clampedY)
+                        sendMouseReport(0x00, accX, accY)
                     }
                 }
                 return true
@@ -457,6 +460,22 @@ class MainActivity : ComponentActivity() {
         dragEligible = false
         Log.d(TAG, "Drag activated after ${DRAG_HOLD_MS}ms hold")
         sendMouseReport(0x01, 0, 0)
+    }
+
+    private fun applyAcceleration(dx: Float, dy: Float, dtMs: Long): Pair<Int, Int> {
+        val dt = if (dtMs > 0) dtMs.toFloat() else 1f
+        val distance = sqrt(dx * dx + dy * dy)
+        val speed = distance / dt
+
+        val gain = when {
+            speed <= 1.0f -> 0.8f
+            speed <= 4.0f -> 0.8f + (speed - 1.0f) * (1.5f - 0.8f) / (4.0f - 1.0f)
+            else -> 2.2f
+        }
+
+        val outX = (dx * gain).toInt().coerceIn(-127, 127)
+        val outY = (dy * gain).toInt().coerceIn(-127, 127)
+        return Pair(outX, outY)
     }
 
     @SuppressLint("MissingPermission")
