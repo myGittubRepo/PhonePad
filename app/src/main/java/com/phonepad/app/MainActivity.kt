@@ -8,6 +8,11 @@ import android.bluetooth.BluetoothHidDevice
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -58,6 +63,8 @@ class MainActivity : ComponentActivity() {
         private const val TAP_DURATION_MS = 180L
         private const val TAP_MOVEMENT_DP = 10f
         private const val DRAG_HOLD_MS = 350L
+        private const val PREFS_NAME = "phonepad_prefs"
+        private const val PREF_LAST_HOST_ADDRESS = "last_host_address"
     }
 
     // Milestone 0 diagnostics
@@ -92,6 +99,12 @@ class MainActivity : ComponentActivity() {
     private var fingerDown = false
     private val handler = Handler(Looper.getMainLooper())
     private val dragTriggerRunnable = Runnable { tryActivateDrag() }
+
+    // Milestone 6 persistence and auto-reconnect
+    private lateinit var prefs: SharedPreferences
+    private var autoReconnectAttempted = false
+    private var bluetoothReceiverRegistered = false
+    private var isHidAppRegistered = false
 
     // Mouse HID report descriptor: 3 buttons, relative X, relative Y
     private val mouseDescriptor = byteArrayOf(
@@ -133,7 +146,7 @@ class MainActivity : ComponentActivity() {
         if (allGranted) {
             Log.d(TAG, "Bluetooth permissions granted")
             permissionStatus = "Granted"
-            checkHidProfile()
+            ensureHidSession()
         } else {
             Log.w(TAG, "Bluetooth permissions denied: $results")
             permissionStatus = "Denied"
@@ -144,11 +157,17 @@ class MainActivity : ComponentActivity() {
     private val hidCallback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
             Log.d(TAG, "onAppStatusChanged: registered=$registered, device=$pluggedDevice")
+            isHidAppRegistered = registered
             if (registered) {
                 registrationStatus = "REGISTERED"
+                Log.d(TAG, "New registration cycle — resetting autoReconnectAttempted")
+                autoReconnectAttempted = false
                 loadBondedDevices()
+                attemptAutoReconnect()
             } else {
                 registrationStatus = "NOT REGISTERED"
+                Log.d(TAG, "Registration lost — resetting autoReconnectAttempted")
+                autoReconnectAttempted = false
             }
         }
 
@@ -162,7 +181,20 @@ class MainActivity : ComponentActivity() {
             }
             Log.d(TAG, "onConnectionStateChanged: device=$device, state=$stateName")
             connectionStatus = stateName
-            connectedDevice = if (state == BluetoothProfile.STATE_CONNECTED) device else null
+
+            when (state) {
+                BluetoothProfile.STATE_CONNECTED -> {
+                    connectedDevice = device
+                    if (device != null) {
+                        saveLastHost(device.address)
+                    }
+                }
+                BluetoothProfile.STATE_DISCONNECTED -> {
+                    cleanupDragState()
+                    connectedDevice = null
+                }
+                else -> {}
+            }
         }
     }
 
@@ -180,10 +212,41 @@ class MainActivity : ComponentActivity() {
         override fun onServiceDisconnected(profile: Int) {
             Log.d(TAG, "onServiceDisconnected: profile=$profile")
             if (profile == BluetoothProfile.HID_DEVICE) {
+                Log.w(TAG, "HID_DEVICE profile service lost — resetting session state")
+                cleanupDragState()
                 hidDevice = null
+                isHidAppRegistered = false
                 registrationStatus = "NOT REGISTERED"
                 connectionStatus = "DISCONNECTED"
                 connectedDevice = null
+                hidProfileStatus = "DISCONNECTED"
+                autoReconnectAttempted = false
+            }
+        }
+    }
+
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
+            val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+
+            when (state) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> {
+                    Log.w(TAG, "Bluetooth STATE_OFF — cleaning up")
+                    bluetoothStatus = if (state == BluetoothAdapter.STATE_OFF) "Bluetooth disabled" else "Turning off…"
+                    cleanupDragState()
+                    connectedDevice = null
+                    connectionStatus = "DISCONNECTED"
+                    isHidAppRegistered = false
+                    registrationStatus = "NOT REGISTERED"
+                    autoReconnectAttempted = false
+                    hidProfileStatus = "N/A (Bluetooth off)"
+                }
+                BluetoothAdapter.STATE_ON -> {
+                    Log.d(TAG, "Bluetooth STATE_ON — starting HID session recovery")
+                    bluetoothStatus = "Enabled"
+                    ensureHidSession()
+                }
             }
         }
     }
@@ -192,7 +255,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         tapMovementThresholdPx = TAP_MOVEMENT_DP * resources.displayMetrics.density
+
+        val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+        if (lastHost != null) {
+            Log.d(TAG, "Last host restored: $lastHost")
+        }
 
         val bluetoothManager = getSystemService(BluetoothManager::class.java)
         bluetoothAdapter = bluetoothManager?.adapter
@@ -204,6 +273,7 @@ class MainActivity : ComponentActivity() {
             hidProfileStatus = "N/A"
         } else {
             Log.d(TAG, "BluetoothAdapter available")
+            registerBluetoothReceiver()
             if (!bluetoothAdapter!!.isEnabled) {
                 Log.w(TAG, "Bluetooth is disabled")
                 bluetoothStatus = "Bluetooth disabled"
@@ -235,13 +305,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        Log.d(TAG, "onResume: checking HID session recovery")
+        if (connectedDevice == null) {
+            Log.d(TAG, "onResume: no active connection — resetting autoReconnectAttempted")
+            autoReconnectAttempted = false
+        }
+        if (bluetoothAdapter != null && hasBluetoothPermissions()) {
+            ensureHidSession()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "onDestroy: cleaning up")
+        unregisterBluetoothReceiver()
         handler.removeCallbacks(dragTriggerRunnable)
-        if (isDragging) {
-            releaseLeftButton()
-            isDragging = false
-        }
+        cleanupDragState()
         hidDevice?.let { hid ->
             Log.d(TAG, "Closing HID profile proxy")
             try {
@@ -253,6 +334,130 @@ class MainActivity : ComponentActivity() {
         }
         hidDevice = null
         connectedDevice = null
+        isHidAppRegistered = false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun ensureHidSession() {
+        val adapter = bluetoothAdapter ?: return
+        if (!adapter.isEnabled) {
+            Log.d(TAG, "ensureHidSession: Bluetooth disabled, cannot proceed")
+            bluetoothStatus = "Bluetooth disabled"
+            return
+        }
+        bluetoothStatus = "Enabled"
+
+        if (!hasBluetoothPermissions()) {
+            Log.d(TAG, "ensureHidSession: missing permissions, cannot proceed")
+            return
+        }
+
+        if (hidDevice == null) {
+            Log.d(TAG, "ensureHidSession: no HID profile proxy — requesting profile")
+            hidProfileStatus = "Checking…"
+            val requested = adapter.getProfileProxy(this, profileListener, BluetoothProfile.HID_DEVICE)
+            Log.d(TAG, "ensureHidSession: getProfileProxy returned $requested")
+            if (!requested) {
+                hidProfileStatus = "UNSUPPORTED"
+            }
+            return
+        }
+
+        if (!isHidAppRegistered) {
+            Log.d(TAG, "ensureHidSession: HID profile present but app not registered — registering")
+            registerHidApp()
+            return
+        }
+
+        if (connectedDevice == null) {
+            Log.d(TAG, "ensureHidSession: registered but disconnected — attempting reconnect")
+            attemptAutoReconnect()
+        }
+    }
+
+    private fun hasBluetoothPermissions(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    private fun registerBluetoothReceiver() {
+        if (bluetoothReceiverRegistered) return
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        registerReceiver(bluetoothStateReceiver, filter)
+        bluetoothReceiverRegistered = true
+        Log.d(TAG, "Bluetooth state receiver registered")
+    }
+
+    private fun unregisterBluetoothReceiver() {
+        if (!bluetoothReceiverRegistered) return
+        try {
+            unregisterReceiver(bluetoothStateReceiver)
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "Bluetooth receiver already unregistered: ${e.message}")
+        }
+        bluetoothReceiverRegistered = false
+        Log.d(TAG, "Bluetooth state receiver unregistered")
+    }
+
+    private fun cleanupDragState() {
+        handler.removeCallbacks(dragTriggerRunnable)
+        if (isDragging) {
+            Log.d(TAG, "Cleaning up drag state, releasing button")
+            releaseLeftButton()
+        }
+        isDragging = false
+        dragEligible = false
+        tapEligible = false
+        fingerDown = false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun saveLastHost(address: String) {
+        Log.d(TAG, "Saving last host: $address")
+        prefs.edit().putString(PREF_LAST_HOST_ADDRESS, address).apply()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun attemptAutoReconnect() {
+        if (autoReconnectAttempted) {
+            Log.d(TAG, "Auto-reconnect: already attempted this cycle, skipping")
+            return
+        }
+        if (connectedDevice != null) {
+            Log.d(TAG, "Auto-reconnect: already connected, skipping")
+            return
+        }
+
+        val lastAddress = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+        if (lastAddress == null) {
+            Log.d(TAG, "Auto-reconnect: no last host stored, skipping")
+            return
+        }
+
+        val adapter = bluetoothAdapter ?: return
+        val hid = hidDevice ?: return
+
+        val bonded = adapter.bondedDevices ?: emptySet()
+        val target = bonded.find { it.address == lastAddress }
+
+        if (target == null) {
+            Log.d(TAG, "Auto-reconnect: last host $lastAddress not in bonded devices, skipping")
+            return
+        }
+
+        autoReconnectAttempted = true
+        Log.d(TAG, "Auto-reconnect: attempting to connect to ${target.name} [$lastAddress]")
+        connectionStatus = "CONNECTING"
+        val requested = hid.connect(target)
+        Log.d(TAG, "Auto-reconnect: connect() returned $requested")
+        if (!requested) {
+            Log.w(TAG, "Auto-reconnect: connect request was not accepted")
+            connectionStatus = "DISCONNECTED"
+        }
     }
 
     private fun requestBluetoothPermissions() {
@@ -267,7 +472,7 @@ class MainActivity : ComponentActivity() {
             if (allGranted) {
                 Log.d(TAG, "Bluetooth permissions already granted")
                 permissionStatus = "Granted"
-                checkHidProfile()
+                ensureHidSession()
             } else {
                 Log.d(TAG, "Requesting Bluetooth permissions")
                 permissionLauncher.launch(permissions)
@@ -275,24 +480,7 @@ class MainActivity : ComponentActivity() {
         } else {
             Log.d(TAG, "Android < 12 — no runtime Bluetooth permissions needed")
             permissionStatus = "Granted (pre-Android 12)"
-            checkHidProfile()
-        }
-    }
-
-    private fun checkHidProfile() {
-        if (bluetoothAdapter == null) return
-
-        hidProfileStatus = "Checking…"
-        val requested = bluetoothAdapter!!.getProfileProxy(
-            this,
-            profileListener,
-            BluetoothProfile.HID_DEVICE
-        )
-        Log.d(TAG, "getProfileProxy(HID_DEVICE) returned: $requested")
-
-        if (!requested) {
-            Log.w(TAG, "getProfileProxy returned false — HID_DEVICE profile UNSUPPORTED")
-            hidProfileStatus = "UNSUPPORTED"
+            ensureHidSession()
         }
     }
 
