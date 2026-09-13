@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.phonepad.app.ui.theme.PhonePadTheme
+import kotlin.math.abs
+import kotlin.math.pow
 import kotlin.math.sqrt
 
 class MainActivity : ComponentActivity() {
@@ -65,6 +67,19 @@ class MainActivity : ComponentActivity() {
         private const val DRAG_HOLD_MS = 350L
         private const val PREFS_NAME = "phonepad_prefs"
         private const val PREF_LAST_HOST_ADDRESS = "last_host_address"
+
+        private const val SCROLL_PIXELS_PER_NOTCH = 48f
+        private const val SCROLL_DIRECTION = 1
+        private const val SCROLL_OUTPUT_INTERVAL_MS = 16L
+        private const val SCROLL_VELOCITY_SMOOTHING = 0.25f
+        private const val SCROLL_MOMENTUM_FRICTION = 0.975f
+        private const val SCROLL_MOMENTUM_MIN_VELOCITY = 0.01f
+        private const val SCROLL_MOMENTUM_RELEASE_GRACE_MS = 150L
+
+        private const val RESOLUTION_MULTIPLIER_PHYSICAL_MIN = 1
+        private const val RESOLUTION_MULTIPLIER_PHYSICAL_MAX = 8
+        private const val FEATURE_REPORT_ID: Byte = 2
+        private const val INPUT_REPORT_ID: Int = 1
     }
 
     // Milestone 0 diagnostics
@@ -106,13 +121,36 @@ class MainActivity : ComponentActivity() {
     private var bluetoothReceiverRegistered = false
     private var isHidAppRegistered = false
 
-    // Mouse HID report descriptor: 3 buttons, relative X, relative Y
+    // Milestone 2.1 two-finger scroll
+    private var isTwoFingerScrolling = false
+    private var gestureContainedMultiTouch = false
+    private var previousCentroidY = 0f
+    private var scrollAccumulator = 0f
+    private var scrollVelocityPxPerMs = 0f
+    private var lastScrollEventTime = 0L
+    private var scrollOutputActive = false
+    private var momentumScrollActive = false
+    private var previousScrollTickTime = 0L
+    private var pointerUpTime = 0L
+    private val scrollTickRunnable = Runnable { tickScrollOutput() }
+
+    // High-resolution wheel
+    private var wheelResolutionMultiplierRaw = 0
+    private var effectiveWheelMultiplier = 1
+
+    // Mouse HID report descriptor: 3 buttons, relative X/Y, vertical wheel
+    // with Resolution Multiplier Feature Report for high-resolution scrolling.
+    // Report ID 1 = Input (buttons, X, Y, wheel), Report ID 2 = Feature (multiplier).
     private val mouseDescriptor = byteArrayOf(
         0x05.toByte(), 0x01.toByte(), // USAGE_PAGE (Generic Desktop)
         0x09.toByte(), 0x02.toByte(), // USAGE (Mouse)
         0xA1.toByte(), 0x01.toByte(), // COLLECTION (Application)
         0x09.toByte(), 0x01.toByte(), //   USAGE (Pointer)
         0xA1.toByte(), 0x00.toByte(), //   COLLECTION (Physical)
+
+        // --- Report ID 1: Input Report ---
+        0x85.toByte(), 0x01.toByte(), //     REPORT_ID (1)
+
         // Buttons (3)
         0x05.toByte(), 0x09.toByte(), //     USAGE_PAGE (Button)
         0x19.toByte(), 0x01.toByte(), //     USAGE_MINIMUM (Button 1)
@@ -126,6 +164,7 @@ class MainActivity : ComponentActivity() {
         0x95.toByte(), 0x01.toByte(), //     REPORT_COUNT (1)
         0x75.toByte(), 0x05.toByte(), //     REPORT_SIZE (5)
         0x81.toByte(), 0x03.toByte(), //     INPUT (Cnst,Var,Abs)
+
         // X, Y relative movement
         0x05.toByte(), 0x01.toByte(), //     USAGE_PAGE (Generic Desktop)
         0x09.toByte(), 0x30.toByte(), //     USAGE (X)
@@ -135,8 +174,39 @@ class MainActivity : ComponentActivity() {
         0x75.toByte(), 0x08.toByte(), //     REPORT_SIZE (8)
         0x95.toByte(), 0x02.toByte(), //     REPORT_COUNT (2)
         0x81.toByte(), 0x06.toByte(), //     INPUT (Data,Var,Rel)
-        0xC0.toByte(),               //   END_COLLECTION
-        0xC0.toByte()                // END_COLLECTION
+
+        // --- Logical Collection: Wheel + Resolution Multiplier ---
+        0xA1.toByte(), 0x02.toByte(), //     COLLECTION (Logical)
+
+        // Feature Report: Resolution Multiplier (Report ID 2)
+        0x85.toByte(), 0x02.toByte(), //       REPORT_ID (2)
+        0x09.toByte(), 0x48.toByte(), //       USAGE (Resolution Multiplier)
+        0x15.toByte(), 0x00.toByte(), //       LOGICAL_MINIMUM (0)
+        0x25.toByte(), 0x01.toByte(), //       LOGICAL_MAXIMUM (1)
+        0x35.toByte(), 0x01.toByte(), //       PHYSICAL_MINIMUM (1)
+        0x45.toByte(), 0x08.toByte(), //       PHYSICAL_MAXIMUM (8)
+        0x75.toByte(), 0x02.toByte(), //       REPORT_SIZE (2)
+        0x95.toByte(), 0x01.toByte(), //       REPORT_COUNT (1)
+        0xB1.toByte(), 0x02.toByte(), //       FEATURE (Data,Var,Abs)
+        // Feature padding (6 bits to fill byte)
+        0x75.toByte(), 0x06.toByte(), //       REPORT_SIZE (6)
+        0x95.toByte(), 0x01.toByte(), //       REPORT_COUNT (1)
+        0xB1.toByte(), 0x01.toByte(), //       FEATURE (Cnst,Var,Abs)
+
+        // Input: Wheel (Report ID 1, bound to same Logical Collection as multiplier)
+        0x85.toByte(), 0x01.toByte(), //       REPORT_ID (1)
+        0x09.toByte(), 0x38.toByte(), //       USAGE (Wheel)
+        0x15.toByte(), 0x81.toByte(), //       LOGICAL_MINIMUM (-127)
+        0x25.toByte(), 0x7F.toByte(), //       LOGICAL_MAXIMUM (127)
+        0x35.toByte(), 0x00.toByte(), //       PHYSICAL_MINIMUM (0)
+        0x45.toByte(), 0x00.toByte(), //       PHYSICAL_MAXIMUM (0)
+        0x75.toByte(), 0x08.toByte(), //       REPORT_SIZE (8)
+        0x95.toByte(), 0x01.toByte(), //       REPORT_COUNT (1)
+        0x81.toByte(), 0x06.toByte(), //       INPUT (Data,Var,Rel)
+
+        0xC0.toByte(),               //     END_COLLECTION (Logical)
+        0xC0.toByte(),               //   END_COLLECTION (Physical)
+        0xC0.toByte()                // END_COLLECTION (Application)
     )
 
     private val permissionLauncher = registerForActivityResult(
@@ -191,9 +261,42 @@ class MainActivity : ComponentActivity() {
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     cleanupDragState()
+                    stopScrollOutput()
+                    resetScrollState()
+                    resetWheelMultiplier()
                     connectedDevice = null
                 }
                 else -> {}
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onGetReport(device: BluetoothDevice?, type: Byte, id: Byte, bufferSize: Int) {
+            Log.d(TAG, "onGetReport: type=$type, id=$id, bufferSize=$bufferSize")
+            val hid = hidDevice ?: return
+            if (type == 3.toByte() && id == FEATURE_REPORT_ID) {
+                val data = byteArrayOf((wheelResolutionMultiplierRaw and 0x03).toByte())
+                hid.replyReport(device, type, id, data)
+                Log.d(TAG, "Replied to GET_REPORT: multiplier raw=$wheelResolutionMultiplierRaw")
+            } else {
+                hid.reportError(device, BluetoothHidDevice.ERROR_RSP_UNSUPPORTED_REQ)
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onSetReport(device: BluetoothDevice?, type: Byte, id: Byte, data: ByteArray?) {
+            Log.d(TAG, "onSetReport: type=$type, id=$id, data=${data?.map { it.toInt() and 0xFF }}")
+            val hid = hidDevice ?: return
+            if (type == 3.toByte() && id == FEATURE_REPORT_ID && data != null && data.isNotEmpty()) {
+                val rawValue = data[0].toInt() and 0x03
+                wheelResolutionMultiplierRaw = rawValue
+                effectiveWheelMultiplier = rawValue *
+                    (RESOLUTION_MULTIPLIER_PHYSICAL_MAX - RESOLUTION_MULTIPLIER_PHYSICAL_MIN) +
+                    RESOLUTION_MULTIPLIER_PHYSICAL_MIN
+                Log.d(TAG, "Resolution Multiplier SET: raw=$rawValue, effective=${effectiveWheelMultiplier}x")
+                hid.reportError(device, BluetoothHidDevice.ERROR_RSP_SUCCESS)
+            } else {
+                hid.reportError(device, BluetoothHidDevice.ERROR_RSP_UNSUPPORTED_REQ)
             }
         }
     }
@@ -214,6 +317,9 @@ class MainActivity : ComponentActivity() {
             if (profile == BluetoothProfile.HID_DEVICE) {
                 Log.w(TAG, "HID_DEVICE profile service lost — resetting session state")
                 cleanupDragState()
+                stopScrollOutput()
+                resetScrollState()
+                resetWheelMultiplier()
                 hidDevice = null
                 isHidAppRegistered = false
                 registrationStatus = "NOT REGISTERED"
@@ -235,6 +341,9 @@ class MainActivity : ComponentActivity() {
                     Log.w(TAG, "Bluetooth STATE_OFF — cleaning up")
                     bluetoothStatus = if (state == BluetoothAdapter.STATE_OFF) "Bluetooth disabled" else "Turning off…"
                     cleanupDragState()
+                    stopScrollOutput()
+                    resetScrollState()
+                    resetWheelMultiplier()
                     connectedDevice = null
                     connectionStatus = "DISCONNECTED"
                     isHidAppRegistered = false
@@ -322,6 +431,7 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "onDestroy: cleaning up")
         unregisterBluetoothReceiver()
         handler.removeCallbacks(dragTriggerRunnable)
+        stopScrollOutput()
         cleanupDragState()
         hidDevice?.let { hid ->
             Log.d(TAG, "Closing HID profile proxy")
@@ -413,6 +523,96 @@ class MainActivity : ComponentActivity() {
         dragEligible = false
         tapEligible = false
         fingerDown = false
+    }
+
+    private fun resetScrollState() {
+        isTwoFingerScrolling = false
+        gestureContainedMultiTouch = false
+        scrollAccumulator = 0f
+        previousCentroidY = 0f
+        scrollVelocityPxPerMs = 0f
+        lastScrollEventTime = 0L
+        pointerUpTime = 0L
+    }
+
+    private fun resetWheelMultiplier() {
+        wheelResolutionMultiplierRaw = 0
+        effectiveWheelMultiplier = 1
+        Log.d(TAG, "Wheel resolution multiplier reset to default (1x)")
+    }
+
+    private fun stopScrollOutput() {
+        if (scrollOutputActive || momentumScrollActive) {
+            Log.d(TAG, "Scroll output stopped")
+        }
+        scrollOutputActive = false
+        momentumScrollActive = false
+        handler.removeCallbacks(scrollTickRunnable)
+    }
+
+    private fun startScrollOutputLoop() {
+        if (scrollOutputActive) return
+        scrollOutputActive = true
+        previousScrollTickTime = SystemClock.uptimeMillis()
+        handler.postDelayed(scrollTickRunnable, SCROLL_OUTPUT_INTERVAL_MS)
+    }
+
+    private fun stopScrollOutputLoop() {
+        scrollOutputActive = false
+        if (!momentumScrollActive) {
+            handler.removeCallbacks(scrollTickRunnable)
+        }
+    }
+
+    private fun startMomentum() {
+        if (abs(scrollVelocityPxPerMs) < SCROLL_MOMENTUM_MIN_VELOCITY) {
+            Log.d(TAG, "Scroll velocity too low for momentum: $scrollVelocityPxPerMs px/ms")
+            scrollAccumulator = 0f
+            scrollVelocityPxPerMs = 0f
+            return
+        }
+        momentumScrollActive = true
+        previousScrollTickTime = SystemClock.uptimeMillis()
+        Log.d(TAG, "Scroll momentum started, velocity=$scrollVelocityPxPerMs px/ms")
+        handler.postDelayed(scrollTickRunnable, SCROLL_OUTPUT_INTERVAL_MS)
+    }
+
+    private fun tickScrollOutput() {
+        if (!scrollOutputActive && !momentumScrollActive) return
+        if (connectedDevice == null || hidDevice == null) {
+            stopScrollOutput()
+            return
+        }
+
+        val now = SystemClock.uptimeMillis()
+        val dtMs = (now - previousScrollTickTime).toFloat().coerceAtLeast(1f)
+        previousScrollTickTime = now
+
+        if (momentumScrollActive) {
+            scrollAccumulator += scrollVelocityPxPerMs * dtMs
+            val decay = SCROLL_MOMENTUM_FRICTION.pow(dtMs / SCROLL_OUTPUT_INTERVAL_MS.toFloat())
+            scrollVelocityPxPerMs *= decay
+
+            if (abs(scrollVelocityPxPerMs) < SCROLL_MOMENTUM_MIN_VELOCITY) {
+                Log.d(TAG, "Scroll momentum ended naturally")
+                momentumScrollActive = false
+                scrollAccumulator = 0f
+                scrollVelocityPxPerMs = 0f
+                return
+            }
+        }
+
+        val pixelsPerCount = SCROLL_PIXELS_PER_NOTCH / effectiveWheelMultiplier
+        val counts = (scrollAccumulator / pixelsPerCount).toInt()
+        if (counts != 0) {
+            scrollAccumulator -= counts * pixelsPerCount
+            val wheel = (counts * SCROLL_DIRECTION).coerceIn(-127, 127)
+            sendMouseReport(0x00, 0, 0, wheel)
+        }
+
+        if (scrollOutputActive || momentumScrollActive) {
+            handler.postDelayed(scrollTickRunnable, SCROLL_OUTPUT_INTERVAL_MS)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -534,96 +734,59 @@ class MainActivity : ComponentActivity() {
     private fun handleTrackpadTouch(event: MotionEvent): Boolean {
         if (connectedDevice == null || hidDevice == null) return false
 
-        if (event.pointerCount > 1) {
-            tapEligible = false
-            dragEligible = false
-            handler.removeCallbacks(dragTriggerRunnable)
-            if (isDragging) {
-                Log.d(TAG, "Drag cancelled: multi-touch detected")
-                releaseLeftButton()
-                isDragging = false
-            }
-        }
-
-        if (event.pointerCount != 1) return false
-
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                previousX = event.x
-                previousY = event.y
-                previousEventTime = event.eventTime
-                touchDownTime = SystemClock.uptimeMillis()
-                touchDownX = event.x
-                touchDownY = event.y
-                tapEligible = true
-                dragEligible = true
-                isDragging = false
-                fingerDown = true
-                handler.postDelayed(dragTriggerRunnable, DRAG_HOLD_MS)
-                Log.d(TAG, "Touch started at (${event.x}, ${event.y})")
+                stopScrollOutput()
+                scrollAccumulator = 0f
+                scrollVelocityPxPerMs = 0f
+                isTwoFingerScrolling = false
+                gestureContainedMultiTouch = false
+                return handleSingleFingerDown(event)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                enterMultiTouch()
+                if (event.pointerCount == 2) {
+                    beginTwoFingerScroll(event)
+                }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                val dx = event.x - previousX
-                val dy = event.y - previousY
-                val dtMs = event.eventTime - previousEventTime
-                previousX = event.x
-                previousY = event.y
-                previousEventTime = event.eventTime
-
-                if (!isDragging) {
-                    val distX = event.x - touchDownX
-                    val distY = event.y - touchDownY
-                    val distance = sqrt(distX * distX + distY * distY)
-
-                    if (distance > tapMovementThresholdPx) {
-                        if (tapEligible) tapEligible = false
-                        if (dragEligible) {
-                            dragEligible = false
-                            handler.removeCallbacks(dragTriggerRunnable)
-                        }
-                    }
+                if (event.pointerCount == 2 && isTwoFingerScrolling) {
+                    handleTwoFingerScrollInput(event)
+                    return true
                 }
-
-                val (accX, accY) = applyAcceleration(dx, dy, dtMs)
-
-                if (accX != 0 || accY != 0) {
-                    if (isDragging) {
-                        sendMouseReport(0x01, accX, accY)
-                    } else {
-                        sendMouseReport(0x00, accX, accY)
-                    }
+                if (event.pointerCount == 1 && !gestureContainedMultiTouch) {
+                    return handleSingleFingerMove(event)
+                }
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (isTwoFingerScrolling) {
+                    endTwoFingerScroll()
                 }
                 return true
             }
             MotionEvent.ACTION_UP -> {
-                handler.removeCallbacks(dragTriggerRunnable)
-                fingerDown = false
-
-                if (isDragging) {
-                    Log.d(TAG, "Drag ended")
-                    releaseLeftButton()
-                    isDragging = false
-                } else {
-                    val duration = SystemClock.uptimeMillis() - touchDownTime
-                    when {
-                        !tapEligible -> {
-                            Log.d(TAG, "Tap suppressed: movement threshold exceeded during gesture")
-                        }
-                        duration > TAP_DURATION_MS -> {
-                            Log.d(TAG, "Tap suppressed: duration ${duration}ms > ${TAP_DURATION_MS}ms")
-                        }
-                        else -> {
-                            Log.d(TAG, "Tap detected: duration=${duration}ms")
-                            sendLeftClick()
-                        }
+                if (gestureContainedMultiTouch) {
+                    fingerDown = false
+                    val timeSincePointerUp = SystemClock.uptimeMillis() - pointerUpTime
+                    if (pointerUpTime > 0 && timeSincePointerUp <= SCROLL_MOMENTUM_RELEASE_GRACE_MS) {
+                        Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first, starting momentum")
+                        startMomentum()
+                    } else {
+                        Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first (stale), no momentum")
+                        scrollVelocityPxPerMs = 0f
+                        scrollAccumulator = 0f
                     }
+                    return true
                 }
-                return true
+                return handleSingleFingerUp()
             }
             MotionEvent.ACTION_CANCEL -> {
+                stopScrollOutput()
                 handler.removeCallbacks(dragTriggerRunnable)
                 fingerDown = false
+                isTwoFingerScrolling = false
                 if (isDragging) {
                     Log.d(TAG, "Drag cancelled")
                     releaseLeftButton()
@@ -631,11 +794,146 @@ class MainActivity : ComponentActivity() {
                 }
                 tapEligible = false
                 dragEligible = false
+                gestureContainedMultiTouch = false
+                scrollAccumulator = 0f
+                scrollVelocityPxPerMs = 0f
                 Log.d(TAG, "Touch cancelled")
                 return true
             }
         }
         return false
+    }
+
+    private fun enterMultiTouch() {
+        if (gestureContainedMultiTouch) return
+        gestureContainedMultiTouch = true
+        tapEligible = false
+        dragEligible = false
+        handler.removeCallbacks(dragTriggerRunnable)
+
+        if (isDragging) {
+            Log.d(TAG, "Drag cancelled: multi-touch detected")
+            releaseLeftButton()
+            isDragging = false
+        }
+    }
+
+    private fun beginTwoFingerScroll(event: MotionEvent) {
+        val y0 = event.getY(0)
+        val y1 = event.getY(1)
+        previousCentroidY = (y0 + y1) / 2f
+        scrollAccumulator = 0f
+        scrollVelocityPxPerMs = 0f
+        lastScrollEventTime = event.eventTime
+        pointerUpTime = 0L
+        isTwoFingerScrolling = true
+        startScrollOutputLoop()
+        Log.d(TAG, "Two-finger scroll started")
+    }
+
+    private fun endTwoFingerScroll() {
+        Log.d(TAG, "Two-finger scroll input ended, velocity=$scrollVelocityPxPerMs px/ms")
+        isTwoFingerScrolling = false
+        stopScrollOutputLoop()
+        pointerUpTime = SystemClock.uptimeMillis()
+    }
+
+    private fun handleTwoFingerScrollInput(event: MotionEvent) {
+        if (event.pointerCount != 2) return
+
+        val y0 = event.getY(0)
+        val y1 = event.getY(1)
+        val currentCentroidY = (y0 + y1) / 2f
+
+        val deltaY = currentCentroidY - previousCentroidY
+        previousCentroidY = currentCentroidY
+
+        val dtMs = event.eventTime - lastScrollEventTime
+        lastScrollEventTime = event.eventTime
+
+        scrollAccumulator += deltaY
+
+        if (dtMs > 0) {
+            val instantVelocityPxPerMs = deltaY / dtMs.toFloat()
+            scrollVelocityPxPerMs = scrollVelocityPxPerMs * (1f - SCROLL_VELOCITY_SMOOTHING) +
+                instantVelocityPxPerMs * SCROLL_VELOCITY_SMOOTHING
+        }
+    }
+
+    private fun handleSingleFingerDown(event: MotionEvent): Boolean {
+        previousX = event.x
+        previousY = event.y
+        previousEventTime = event.eventTime
+        touchDownTime = SystemClock.uptimeMillis()
+        touchDownX = event.x
+        touchDownY = event.y
+        tapEligible = true
+        dragEligible = true
+        isDragging = false
+        fingerDown = true
+        handler.postDelayed(dragTriggerRunnable, DRAG_HOLD_MS)
+        Log.d(TAG, "Touch started at (${event.x}, ${event.y})")
+        return true
+    }
+
+    private fun handleSingleFingerMove(event: MotionEvent): Boolean {
+        val dx = event.x - previousX
+        val dy = event.y - previousY
+        val dtMs = event.eventTime - previousEventTime
+        previousX = event.x
+        previousY = event.y
+        previousEventTime = event.eventTime
+
+        if (!isDragging) {
+            val distX = event.x - touchDownX
+            val distY = event.y - touchDownY
+            val distance = sqrt(distX * distX + distY * distY)
+
+            if (distance > tapMovementThresholdPx) {
+                if (tapEligible) tapEligible = false
+                if (dragEligible) {
+                    dragEligible = false
+                    handler.removeCallbacks(dragTriggerRunnable)
+                }
+            }
+        }
+
+        val (accX, accY) = applyAcceleration(dx, dy, dtMs)
+
+        if (accX != 0 || accY != 0) {
+            if (isDragging) {
+                sendMouseReport(0x01, accX, accY)
+            } else {
+                sendMouseReport(0x00, accX, accY)
+            }
+        }
+        return true
+    }
+
+    private fun handleSingleFingerUp(): Boolean {
+        handler.removeCallbacks(dragTriggerRunnable)
+        fingerDown = false
+
+        if (isDragging) {
+            Log.d(TAG, "Drag ended")
+            releaseLeftButton()
+            isDragging = false
+        } else {
+            val duration = SystemClock.uptimeMillis() - touchDownTime
+            when {
+                !tapEligible -> {
+                    Log.d(TAG, "Tap suppressed: movement threshold exceeded during gesture")
+                }
+                duration > TAP_DURATION_MS -> {
+                    Log.d(TAG, "Tap suppressed: duration ${duration}ms > ${TAP_DURATION_MS}ms")
+                }
+                else -> {
+                    Log.d(TAG, "Tap detected: duration=${duration}ms")
+                    sendLeftClick()
+                }
+            }
+        }
+        return true
     }
 
     @SuppressLint("MissingPermission")
@@ -671,11 +969,11 @@ class MainActivity : ComponentActivity() {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
 
-        val down = byteArrayOf(0x01.toByte(), 0x00.toByte(), 0x00.toByte())
-        val up = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val down = byteArrayOf(0x01.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val up = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
 
-        val downResult = hid.sendReport(device, 0, down)
-        val upResult = hid.sendReport(device, 0, up)
+        val downResult = hid.sendReport(device, INPUT_REPORT_ID, down)
+        val upResult = hid.sendReport(device, INPUT_REPORT_ID, up)
 
         if (!downResult || !upResult) {
             Log.w(TAG, "sendLeftClick failed: down=$downResult, up=$upResult")
@@ -687,27 +985,28 @@ class MainActivity : ComponentActivity() {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
 
-        val release = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte())
-        val result = hid.sendReport(device, 0, release)
+        val release = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val result = hid.sendReport(device, INPUT_REPORT_ID, release)
         if (!result) {
             Log.w(TAG, "releaseLeftButton failed")
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun sendMouseReport(buttons: Int, dx: Int, dy: Int) {
+    private fun sendMouseReport(buttons: Int, dx: Int, dy: Int, wheel: Int = 0) {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
 
         val report = byteArrayOf(
             buttons.toByte(),
             dx.toByte(),
-            dy.toByte()
+            dy.toByte(),
+            wheel.toByte()
         )
 
-        val result = hid.sendReport(device, 0, report)
+        val result = hid.sendReport(device, INPUT_REPORT_ID, report)
         if (!result) {
-            Log.w(TAG, "sendReport failed: buttons=$buttons, dx=$dx, dy=$dy")
+            Log.w(TAG, "sendReport failed: buttons=$buttons, dx=$dx, dy=$dy, wheel=$wheel")
         }
     }
 }
@@ -799,7 +1098,7 @@ fun PhonePadScreen(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isConnected) "Move one finger to control cursor\nTap to click\nHold to drag"
+                text = if (isConnected) "Move one finger to control cursor\nTap to click\nHold to drag\nTwo fingers to scroll"
                        else "Not connected",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
