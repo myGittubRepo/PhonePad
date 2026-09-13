@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothProfile
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
@@ -19,7 +20,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -47,11 +47,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.phonepad.app.ui.theme.PhonePadTheme
+import kotlin.math.sqrt
 
 class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "PhonePad"
+        private const val TAP_DURATION_MS = 180L
+        private const val TAP_MOVEMENT_DP = 10f
     }
 
     // Milestone 0 diagnostics
@@ -71,6 +74,13 @@ class MainActivity : ComponentActivity() {
     // Milestone 2 touch tracking
     private var previousX = 0f
     private var previousY = 0f
+
+    // Milestone 3 tap detection
+    private var touchDownTime = 0L
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var tapMovementThresholdPx = 0f
+    private var tapEligible = false
 
     // Mouse HID report descriptor: 3 buttons, relative X, relative Y
     private val mouseDescriptor = byteArrayOf(
@@ -170,6 +180,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        tapMovementThresholdPx = TAP_MOVEMENT_DP * resources.displayMetrics.density
 
         val bluetoothManager = getSystemService(BluetoothManager::class.java)
         bluetoothAdapter = bluetoothManager?.adapter
@@ -317,12 +329,21 @@ class MainActivity : ComponentActivity() {
 
     private fun handleTrackpadTouch(event: MotionEvent): Boolean {
         if (connectedDevice == null || hidDevice == null) return false
+
+        if (event.pointerCount > 1) {
+            tapEligible = false
+        }
+
         if (event.pointerCount != 1) return false
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 previousX = event.x
                 previousY = event.y
+                touchDownTime = SystemClock.uptimeMillis()
+                touchDownX = event.x
+                touchDownY = event.y
+                tapEligible = true
                 Log.d(TAG, "Touch started at (${event.x}, ${event.y})")
                 return true
             }
@@ -332,6 +353,15 @@ class MainActivity : ComponentActivity() {
                 previousX = event.x
                 previousY = event.y
 
+                if (tapEligible) {
+                    val distX = event.x - touchDownX
+                    val distY = event.y - touchDownY
+                    val distance = sqrt(distX * distX + distY * distY)
+                    if (distance > tapMovementThresholdPx) {
+                        tapEligible = false
+                    }
+                }
+
                 val clampedX = dx.toInt().coerceIn(-127, 127)
                 val clampedY = dy.toInt().coerceIn(-127, 127)
 
@@ -340,12 +370,46 @@ class MainActivity : ComponentActivity() {
                 }
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                Log.d(TAG, "Touch ended")
+            MotionEvent.ACTION_UP -> {
+                val duration = SystemClock.uptimeMillis() - touchDownTime
+
+                when {
+                    !tapEligible -> {
+                        Log.d(TAG, "Tap suppressed: movement threshold exceeded during gesture")
+                    }
+                    duration > TAP_DURATION_MS -> {
+                        Log.d(TAG, "Tap suppressed: duration ${duration}ms > ${TAP_DURATION_MS}ms")
+                    }
+                    else -> {
+                        Log.d(TAG, "Tap detected: duration=${duration}ms")
+                        sendLeftClick()
+                    }
+                }
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                tapEligible = false
+                Log.d(TAG, "Touch cancelled")
                 return true
             }
         }
         return false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendLeftClick() {
+        val hid = hidDevice ?: return
+        val device = connectedDevice ?: return
+
+        val down = byteArrayOf(0x01.toByte(), 0x00.toByte(), 0x00.toByte())
+        val up = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+
+        val downResult = hid.sendReport(device, 0, down)
+        val upResult = hid.sendReport(device, 0, up)
+
+        if (!downResult || !upResult) {
+            Log.w(TAG, "sendLeftClick failed: down=$downResult, up=$upResult")
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -453,7 +517,7 @@ fun PhonePadScreen(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isConnected) "Move one finger to control cursor"
+                text = if (isConnected) "Move one finger to control cursor\nTap to click"
                        else "Not connected",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
