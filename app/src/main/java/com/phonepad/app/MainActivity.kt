@@ -68,13 +68,15 @@ class MainActivity : ComponentActivity() {
         private const val PREFS_NAME = "phonepad_prefs"
         private const val PREF_LAST_HOST_ADDRESS = "last_host_address"
 
-        private const val SCROLL_PIXELS_PER_NOTCH = 48f
+        private const val SCROLL_PIXELS_PER_NOTCH = 12f
         private const val SCROLL_DIRECTION = 1
+        private const val SCROLL_DIRECTION_H = -1
         private const val SCROLL_OUTPUT_INTERVAL_MS = 16L
-        private const val SCROLL_VELOCITY_SMOOTHING = 0.25f
-        private const val SCROLL_MOMENTUM_FRICTION = 0.975f
-        private const val SCROLL_MOMENTUM_MIN_VELOCITY = 0.01f
+        private const val SCROLL_VELOCITY_SMOOTHING = 0.35f
+        private const val SCROLL_MOMENTUM_FRICTION = 0.94f
+        private const val SCROLL_MOMENTUM_MIN_VELOCITY = 0.05f
         private const val SCROLL_MOMENTUM_RELEASE_GRACE_MS = 150L
+        private const val SCROLL_AXIS_LOCK_THRESHOLD_DP = 8f
 
         // Two-finger tap → right-click
         private const val TWO_FINGER_TAP_DURATION_MS = 300L
@@ -126,7 +128,7 @@ class MainActivity : ComponentActivity() {
     private var bluetoothReceiverRegistered = false
     private var isHidAppRegistered = false
 
-    // Milestone 2.1 two-finger scroll
+    // Milestone 2.1 two-finger scroll (vertical)
     private var isTwoFingerScrolling = false
     private var gestureContainedMultiTouch = false
     private var previousCentroidY = 0f
@@ -138,6 +140,16 @@ class MainActivity : ComponentActivity() {
     private var previousScrollTickTime = 0L
     private var pointerUpTime = 0L
     private val scrollTickRunnable = Runnable { tickScrollOutput() }
+
+    // Milestone 2.2 horizontal scroll (AC Pan) + axis lock
+    private var previousCentroidX = 0f
+    private var scrollAccumulatorX = 0f
+    private var scrollVelocityXPxPerMs = 0f
+    private var initialCentroidX = 0f
+    private var initialCentroidY = 0f
+    private var scrollAxisLocked = false
+    private var isHorizontalScroll = false
+    private var scrollAxisLockThresholdPx = 0f
 
     // High-resolution wheel
     private var wheelResolutionMultiplierRaw = 0
@@ -221,6 +233,16 @@ class MainActivity : ComponentActivity() {
         0x81.toByte(), 0x06.toByte(), //       INPUT (Data,Var,Rel)
 
         0xC0.toByte(),               //     END_COLLECTION (Logical)
+
+        // Horizontal wheel (AC Pan, Consumer usage 0x0238) — Milestone 2.2
+        0x05.toByte(), 0x0C.toByte(),                   //   USAGE_PAGE (Consumer)
+        0x0A.toByte(), 0x38.toByte(), 0x02.toByte(),    //   USAGE (AC Pan)
+        0x15.toByte(), 0x81.toByte(),                   //   LOGICAL_MINIMUM (-127)
+        0x25.toByte(), 0x7F.toByte(),                   //   LOGICAL_MAXIMUM (127)
+        0x75.toByte(), 0x08.toByte(),                   //   REPORT_SIZE (8)
+        0x95.toByte(), 0x01.toByte(),                   //   REPORT_COUNT (1)
+        0x81.toByte(), 0x06.toByte(),                   //   INPUT (Data,Var,Rel)
+
         0xC0.toByte(),               //   END_COLLECTION (Physical)
         0xC0.toByte()                // END_COLLECTION (Application)
     )
@@ -383,6 +405,7 @@ class MainActivity : ComponentActivity() {
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         tapMovementThresholdPx = TAP_MOVEMENT_DP * resources.displayMetrics.density
         twoFingerTapMovementThresholdPx = TWO_FINGER_TAP_MOVEMENT_DP * resources.displayMetrics.density
+        scrollAxisLockThresholdPx = SCROLL_AXIS_LOCK_THRESHOLD_DP * resources.displayMetrics.density
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -546,12 +569,17 @@ class MainActivity : ComponentActivity() {
         isTwoFingerScrolling = false
         gestureContainedMultiTouch = false
         scrollAccumulator = 0f
+        scrollAccumulatorX = 0f
         previousCentroidY = 0f
+        previousCentroidX = 0f
         scrollVelocityPxPerMs = 0f
+        scrollVelocityXPxPerMs = 0f
         lastScrollEventTime = 0L
         pointerUpTime = 0L
         twoFingerTapEligible = false
         rightClickFiredInGesture = false
+        scrollAxisLocked = false
+        isHorizontalScroll = false
     }
 
     private fun resetWheelMultiplier() {
@@ -584,15 +612,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startMomentum() {
-        if (abs(scrollVelocityPxPerMs) < SCROLL_MOMENTUM_MIN_VELOCITY) {
-            Log.d(TAG, "Scroll velocity too low for momentum: $scrollVelocityPxPerMs px/ms")
-            scrollAccumulator = 0f
-            scrollVelocityPxPerMs = 0f
+        val bothIdle = abs(scrollVelocityPxPerMs) < SCROLL_MOMENTUM_MIN_VELOCITY &&
+            abs(scrollVelocityXPxPerMs) < SCROLL_MOMENTUM_MIN_VELOCITY
+        if (bothIdle) {
+            Log.d(TAG, "Scroll velocity too low for momentum: v=$scrollVelocityPxPerMs, h=$scrollVelocityXPxPerMs px/ms")
+            scrollAccumulator = 0f; scrollAccumulatorX = 0f
+            scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
             return
         }
         momentumScrollActive = true
         previousScrollTickTime = SystemClock.uptimeMillis()
-        Log.d(TAG, "Scroll momentum started, velocity=$scrollVelocityPxPerMs px/ms")
+        Log.d(TAG, "Scroll momentum started, v=$scrollVelocityPxPerMs, h=$scrollVelocityXPxPerMs px/ms")
         handler.postDelayed(scrollTickRunnable, SCROLL_OUTPUT_INTERVAL_MS)
     }
 
@@ -607,26 +637,37 @@ class MainActivity : ComponentActivity() {
         val dtMs = (now - previousScrollTickTime).toFloat().coerceAtLeast(1f)
         previousScrollTickTime = now
 
+        // Velocity-driven integration for BOTH active scroll and momentum.
+        // MotionEvent timing (5-30 ms gaps) never reaches the wheel output —
+        // the output cadence is locked to the 16 ms tick.
+        scrollAccumulator += scrollVelocityPxPerMs * dtMs
+        scrollAccumulatorX += scrollVelocityXPxPerMs * dtMs
+
         if (momentumScrollActive) {
-            scrollAccumulator += scrollVelocityPxPerMs * dtMs
             val decay = SCROLL_MOMENTUM_FRICTION.pow(dtMs / SCROLL_OUTPUT_INTERVAL_MS.toFloat())
             scrollVelocityPxPerMs *= decay
+            scrollVelocityXPxPerMs *= decay
 
-            if (abs(scrollVelocityPxPerMs) < SCROLL_MOMENTUM_MIN_VELOCITY) {
+            val bothIdle = abs(scrollVelocityPxPerMs) < SCROLL_MOMENTUM_MIN_VELOCITY &&
+                abs(scrollVelocityXPxPerMs) < SCROLL_MOMENTUM_MIN_VELOCITY
+            if (bothIdle) {
                 Log.d(TAG, "Scroll momentum ended naturally")
                 momentumScrollActive = false
-                scrollAccumulator = 0f
-                scrollVelocityPxPerMs = 0f
+                scrollAccumulator = 0f; scrollAccumulatorX = 0f
+                scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
                 return
             }
         }
 
         val pixelsPerCount = SCROLL_PIXELS_PER_NOTCH / effectiveWheelMultiplier
-        val counts = (scrollAccumulator / pixelsPerCount).toInt()
-        if (counts != 0) {
-            scrollAccumulator -= counts * pixelsPerCount
-            val wheel = (counts * SCROLL_DIRECTION).coerceIn(-127, 127)
-            sendMouseReport(0x00, 0, 0, wheel)
+        val countsY = (scrollAccumulator / pixelsPerCount).toInt()
+        val countsX = (scrollAccumulatorX / pixelsPerCount).toInt()
+        if (countsY != 0 || countsX != 0) {
+            scrollAccumulator -= countsY * pixelsPerCount
+            scrollAccumulatorX -= countsX * pixelsPerCount
+            val wheelY = (countsY * SCROLL_DIRECTION).coerceIn(-127, 127)
+            val wheelX = (countsX * SCROLL_DIRECTION_H).coerceIn(-127, 127)
+            sendMouseReport(0x00, 0, 0, wheelY, wheelX)
         }
 
         if (scrollOutputActive || momentumScrollActive) {
@@ -756,8 +797,8 @@ class MainActivity : ComponentActivity() {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 stopScrollOutput()
-                scrollAccumulator = 0f
-                scrollVelocityPxPerMs = 0f
+                scrollAccumulator = 0f; scrollAccumulatorX = 0f
+                scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
                 isTwoFingerScrolling = false
                 gestureContainedMultiTouch = false
                 return handleSingleFingerDown(event)
@@ -786,8 +827,8 @@ class MainActivity : ComponentActivity() {
                         Log.d(TAG, "Two-finger tap detected: duration=${duration}ms → right-click")
                         sendRightClick()
                         rightClickFiredInGesture = true
-                        scrollVelocityPxPerMs = 0f
-                        scrollAccumulator = 0f
+                        scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
+                        scrollAccumulator = 0f; scrollAccumulatorX = 0f
                     } else {
                         Log.d(TAG, "Two-finger tap NOT fired: eligible=$twoFingerTapEligible, duration=${duration}ms (max ${TWO_FINGER_TAP_DURATION_MS})")
                     }
@@ -804,8 +845,8 @@ class MainActivity : ComponentActivity() {
                         startMomentum()
                     } else {
                         Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first (stale or right-click), no momentum")
-                        scrollVelocityPxPerMs = 0f
-                        scrollAccumulator = 0f
+                        scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
+                        scrollAccumulator = 0f; scrollAccumulatorX = 0f
                     }
                     return true
                 }
@@ -826,8 +867,8 @@ class MainActivity : ComponentActivity() {
                 gestureContainedMultiTouch = false
                 twoFingerTapEligible = false
                 rightClickFiredInGesture = false
-                scrollAccumulator = 0f
-                scrollVelocityPxPerMs = 0f
+                scrollAccumulator = 0f; scrollAccumulatorX = 0f
+                scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
                 Log.d(TAG, "Touch cancelled")
                 return true
             }
@@ -854,9 +895,18 @@ class MainActivity : ComponentActivity() {
         val y1 = event.getY(1)
         val x0 = event.getX(0)
         val x1 = event.getX(1)
-        previousCentroidY = (y0 + y1) / 2f
+        val cx = (x0 + x1) / 2f
+        val cy = (y0 + y1) / 2f
+        previousCentroidY = cy
+        previousCentroidX = cx
+        initialCentroidY = cy
+        initialCentroidX = cx
+        scrollAxisLocked = false
+        isHorizontalScroll = false
         scrollAccumulator = 0f
+        scrollAccumulatorX = 0f
         scrollVelocityPxPerMs = 0f
+        scrollVelocityXPxPerMs = 0f
         lastScrollEventTime = event.eventTime
         pointerUpTime = 0L
         isTwoFingerScrolling = true
@@ -904,20 +954,45 @@ class MainActivity : ComponentActivity() {
 
         val y0 = event.getY(0)
         val y1 = event.getY(1)
+        val x0 = event.getX(0)
+        val x1 = event.getX(1)
         val currentCentroidY = (y0 + y1) / 2f
+        val currentCentroidX = (x0 + x1) / 2f
+
+        // Axis lock: on first meaningful movement, choose dominant axis and stay locked.
+        if (!scrollAxisLocked) {
+            val totalMoveX = abs(currentCentroidX - initialCentroidX)
+            val totalMoveY = abs(currentCentroidY - initialCentroidY)
+            if (totalMoveX > scrollAxisLockThresholdPx || totalMoveY > scrollAxisLockThresholdPx) {
+                isHorizontalScroll = totalMoveX > totalMoveY
+                scrollAxisLocked = true
+                Log.d(TAG, "Scroll axis locked: ${if (isHorizontalScroll) "HORIZONTAL" else "VERTICAL"}")
+            }
+        }
 
         val deltaY = currentCentroidY - previousCentroidY
+        val deltaX = currentCentroidX - previousCentroidX
         previousCentroidY = currentCentroidY
+        previousCentroidX = currentCentroidX
 
         val dtMs = event.eventTime - lastScrollEventTime
         lastScrollEventTime = event.eventTime
 
-        scrollAccumulator += deltaY
-
-        if (dtMs > 0) {
-            val instantVelocityPxPerMs = deltaY / dtMs.toFloat()
-            scrollVelocityPxPerMs = scrollVelocityPxPerMs * (1f - SCROLL_VELOCITY_SMOOTHING) +
-                instantVelocityPxPerMs * SCROLL_VELOCITY_SMOOTHING
+        // Only update velocity for the locked axis. The tick loop drives the
+        // accumulator from this smoothed velocity, decoupling touch event
+        // jitter (5-30 ms delivery gaps) from the wheel output cadence.
+        if (scrollAxisLocked && dtMs > 0) {
+            if (isHorizontalScroll) {
+                val instantVelocityX = deltaX / dtMs.toFloat()
+                scrollVelocityXPxPerMs = scrollVelocityXPxPerMs * (1f - SCROLL_VELOCITY_SMOOTHING) +
+                    instantVelocityX * SCROLL_VELOCITY_SMOOTHING
+                scrollVelocityPxPerMs = 0f
+            } else {
+                val instantVelocityY = deltaY / dtMs.toFloat()
+                scrollVelocityPxPerMs = scrollVelocityPxPerMs * (1f - SCROLL_VELOCITY_SMOOTHING) +
+                    instantVelocityY * SCROLL_VELOCITY_SMOOTHING
+                scrollVelocityXPxPerMs = 0f
+            }
         }
     }
 
@@ -1030,8 +1105,8 @@ class MainActivity : ComponentActivity() {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
 
-        val down = byteArrayOf(0x01.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
-        val up = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val down = byteArrayOf(0x01.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val up = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
 
         val downResult = hid.sendReport(device, INPUT_REPORT_ID, down)
         val upResult = hid.sendReport(device, INPUT_REPORT_ID, up)
@@ -1046,8 +1121,8 @@ class MainActivity : ComponentActivity() {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
 
-        val down = byteArrayOf(0x02.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
-        val up = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val down = byteArrayOf(0x02.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val up = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
 
         val downResult = hid.sendReport(device, INPUT_REPORT_ID, down)
         val upResult = hid.sendReport(device, INPUT_REPORT_ID, up)
@@ -1062,7 +1137,7 @@ class MainActivity : ComponentActivity() {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
 
-        val release = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val release = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
         val result = hid.sendReport(device, INPUT_REPORT_ID, release)
         if (!result) {
             Log.w(TAG, "releaseLeftButton failed")
@@ -1070,7 +1145,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun sendMouseReport(buttons: Int, dx: Int, dy: Int, wheel: Int = 0) {
+    private fun sendMouseReport(buttons: Int, dx: Int, dy: Int, wheel: Int = 0, wheelH: Int = 0) {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
 
@@ -1078,12 +1153,13 @@ class MainActivity : ComponentActivity() {
             buttons.toByte(),
             dx.toByte(),
             dy.toByte(),
-            wheel.toByte()
+            wheel.toByte(),
+            wheelH.toByte()
         )
 
         val result = hid.sendReport(device, INPUT_REPORT_ID, report)
         if (!result) {
-            Log.w(TAG, "sendReport failed: buttons=$buttons, dx=$dx, dy=$dy, wheel=$wheel")
+            Log.w(TAG, "sendReport failed: buttons=$buttons, dx=$dx, dy=$dy, wheel=$wheel, wheelH=$wheelH")
         }
     }
 }
