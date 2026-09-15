@@ -82,6 +82,12 @@ class MainActivity : ComponentActivity() {
         private const val TWO_FINGER_TAP_DURATION_MS = 300L
         private const val TWO_FINGER_TAP_MOVEMENT_DP = 15f
 
+        // Milestone 2.4 pinch-to-zoom
+        private const val PINCH_DISTANCE_THRESHOLD_DP = 20f
+        private const val PINCH_PIXELS_PER_STEP_DP = 20f
+        private const val KEYBOARD_REPORT_ID: Int = 3
+        private const val KEY_MOD_LCTRL: Byte = 0x01
+
         private const val RESOLUTION_MULTIPLIER_PHYSICAL_MIN = 1
         private const val RESOLUTION_MULTIPLIER_PHYSICAL_MAX = 8
         private const val FEATURE_REPORT_ID: Byte = 2
@@ -150,6 +156,16 @@ class MainActivity : ComponentActivity() {
     private var scrollAxisLocked = false
     private var isHorizontalScroll = false
     private var scrollAxisLockThresholdPx = 0f
+
+    // Milestone 2.4 pinch-to-zoom
+    private enum class TwoFingerMode { UNDECIDED, SCROLL, PINCH }
+    private var twoFingerMode = TwoFingerMode.UNDECIDED
+    private var initialFingerDistance = 0f
+    private var previousFingerDistance = 0f
+    private var pinchAccumulator = 0f
+    private var pinchDistanceThresholdPx = 0f
+    private var pinchPixelsPerStep = 0f
+    private var ctrlHeldForPinch = false
 
     // High-resolution wheel
     private var wheelResolutionMultiplierRaw = 0
@@ -244,6 +260,43 @@ class MainActivity : ComponentActivity() {
         0x81.toByte(), 0x06.toByte(),                   //   INPUT (Data,Var,Rel)
 
         0xC0.toByte(),               //   END_COLLECTION (Physical)
+        0xC0.toByte(),               // END_COLLECTION (Application)
+
+        // ===== Keyboard Application Collection (Report ID 3) =====
+        // Standard boot keyboard layout: 1 modifier byte + 1 reserved
+        // byte + 6 keycode bytes = 8-byte report. Milestone 2.4 uses only
+        // the modifier byte (Ctrl for pinch-to-zoom); Phase 3 will use
+        // the keycode array for Win+Tab, Alt+Tab, Win+D, etc.
+        0x05.toByte(), 0x01.toByte(), // USAGE_PAGE (Generic Desktop)
+        0x09.toByte(), 0x06.toByte(), // USAGE (Keyboard)
+        0xA1.toByte(), 0x01.toByte(), // COLLECTION (Application)
+        0x85.toByte(), KEYBOARD_REPORT_ID.toByte(), //   REPORT_ID (3)
+
+        // Modifier byte (8 bits: LCtrl LShift LAlt LGui RCtrl RShift RAlt RGui)
+        0x05.toByte(), 0x07.toByte(), //   USAGE_PAGE (Key Codes)
+        0x19.toByte(), 0xE0.toByte(), //   USAGE_MINIMUM (LCtrl)
+        0x29.toByte(), 0xE7.toByte(), //   USAGE_MAXIMUM (RGui)
+        0x15.toByte(), 0x00.toByte(), //   LOGICAL_MINIMUM (0)
+        0x25.toByte(), 0x01.toByte(), //   LOGICAL_MAXIMUM (1)
+        0x75.toByte(), 0x01.toByte(), //   REPORT_SIZE (1)
+        0x95.toByte(), 0x08.toByte(), //   REPORT_COUNT (8)
+        0x81.toByte(), 0x02.toByte(), //   INPUT (Data,Var,Abs)
+
+        // Reserved byte
+        0x75.toByte(), 0x08.toByte(), //   REPORT_SIZE (8)
+        0x95.toByte(), 0x01.toByte(), //   REPORT_COUNT (1)
+        0x81.toByte(), 0x03.toByte(), //   INPUT (Cnst,Var,Abs)
+
+        // 6 keycodes (array — up to 6 keys held simultaneously)
+        0x05.toByte(), 0x07.toByte(), //   USAGE_PAGE (Key Codes)
+        0x19.toByte(), 0x00.toByte(), //   USAGE_MINIMUM (0)
+        0x29.toByte(), 0xFF.toByte(), //   USAGE_MAXIMUM (255)
+        0x15.toByte(), 0x00.toByte(), //   LOGICAL_MINIMUM (0)
+        0x26.toByte(), 0xFF.toByte(), 0x00.toByte(), // LOGICAL_MAXIMUM (255)
+        0x75.toByte(), 0x08.toByte(), //   REPORT_SIZE (8)
+        0x95.toByte(), 0x06.toByte(), //   REPORT_COUNT (6)
+        0x81.toByte(), 0x00.toByte(), //   INPUT (Data,Ary,Abs)
+
         0xC0.toByte()                // END_COLLECTION (Application)
     )
 
@@ -406,6 +459,8 @@ class MainActivity : ComponentActivity() {
         tapMovementThresholdPx = TAP_MOVEMENT_DP * resources.displayMetrics.density
         twoFingerTapMovementThresholdPx = TWO_FINGER_TAP_MOVEMENT_DP * resources.displayMetrics.density
         scrollAxisLockThresholdPx = SCROLL_AXIS_LOCK_THRESHOLD_DP * resources.displayMetrics.density
+        pinchDistanceThresholdPx = PINCH_DISTANCE_THRESHOLD_DP * resources.displayMetrics.density
+        pinchPixelsPerStep = PINCH_PIXELS_PER_STEP_DP * resources.displayMetrics.density
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -580,6 +635,11 @@ class MainActivity : ComponentActivity() {
         rightClickFiredInGesture = false
         scrollAxisLocked = false
         isHorizontalScroll = false
+        twoFingerMode = TwoFingerMode.UNDECIDED
+        pinchAccumulator = 0f
+        initialFingerDistance = 0f
+        previousFingerDistance = 0f
+        if (ctrlHeldForPinch) releaseCtrlForPinch()
     }
 
     private fun resetWheelMultiplier() {
@@ -750,9 +810,9 @@ class MainActivity : ComponentActivity() {
 
         val sdpSettings = BluetoothHidDeviceAppSdpSettings(
             "PhonePad",
-            "Android Bluetooth Trackpad",
+            "Bluetooth Trackpad + Keyboard",
             "PhonePad",
-            BluetoothHidDevice.SUBCLASS1_MOUSE,
+            BluetoothHidDevice.SUBCLASS1_COMBO,
             mouseDescriptor
         )
 
@@ -839,12 +899,17 @@ class MainActivity : ComponentActivity() {
             MotionEvent.ACTION_UP -> {
                 if (gestureContainedMultiTouch) {
                     fingerDown = false
+                    // Safety: release Ctrl if pinch is somehow still active.
+                    if (ctrlHeldForPinch) releaseCtrlForPinch()
                     val timeSincePointerUp = SystemClock.uptimeMillis() - pointerUpTime
-                    if (!rightClickFiredInGesture && pointerUpTime > 0 && timeSincePointerUp <= SCROLL_MOMENTUM_RELEASE_GRACE_MS) {
+                    val wasPinch = twoFingerMode == TwoFingerMode.PINCH
+                    val shouldStartMomentum = !rightClickFiredInGesture && !wasPinch &&
+                        pointerUpTime > 0 && timeSincePointerUp <= SCROLL_MOMENTUM_RELEASE_GRACE_MS
+                    if (shouldStartMomentum) {
                         Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first, starting momentum")
                         startMomentum()
                     } else {
-                        Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first (stale or right-click), no momentum")
+                        Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first (mode=$twoFingerMode, rc=$rightClickFiredInGesture), no momentum")
                         scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
                         scrollAccumulator = 0f; scrollAccumulatorX = 0f
                     }
@@ -869,6 +934,8 @@ class MainActivity : ComponentActivity() {
                 rightClickFiredInGesture = false
                 scrollAccumulator = 0f; scrollAccumulatorX = 0f
                 scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
+                if (ctrlHeldForPinch) releaseCtrlForPinch()
+                twoFingerMode = TwoFingerMode.UNDECIDED
                 Log.d(TAG, "Touch cancelled")
                 return true
             }
@@ -897,10 +964,15 @@ class MainActivity : ComponentActivity() {
         val x1 = event.getX(1)
         val cx = (x0 + x1) / 2f
         val cy = (y0 + y1) / 2f
+        val fingerDist = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))
         previousCentroidY = cy
         previousCentroidX = cx
         initialCentroidY = cy
         initialCentroidX = cx
+        initialFingerDistance = fingerDist
+        previousFingerDistance = fingerDist
+        pinchAccumulator = 0f
+        twoFingerMode = TwoFingerMode.UNDECIDED
         scrollAxisLocked = false
         isHorizontalScroll = false
         scrollAccumulator = 0f
@@ -925,10 +997,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun endTwoFingerScroll() {
-        Log.d(TAG, "Two-finger scroll input ended, velocity=$scrollVelocityPxPerMs px/ms")
+        Log.d(TAG, "Two-finger input ended, mode=$twoFingerMode, velocityY=$scrollVelocityPxPerMs px/ms")
         isTwoFingerScrolling = false
         stopScrollOutputLoop()
         pointerUpTime = SystemClock.uptimeMillis()
+        // Always release Ctrl on gesture end so it can't get stuck.
+        if (ctrlHeldForPinch) releaseCtrlForPinch()
     }
 
     private fun handleTwoFingerScrollInput(event: MotionEvent) {
@@ -958,16 +1032,37 @@ class MainActivity : ComponentActivity() {
         val x1 = event.getX(1)
         val currentCentroidY = (y0 + y1) / 2f
         val currentCentroidX = (x0 + x1) / 2f
+        val currentFingerDist = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))
 
-        // Axis lock: on first meaningful movement, choose dominant axis and stay locked.
-        if (!scrollAxisLocked) {
+        // Mode decision: whichever metric crosses its threshold first wins.
+        // Pinch = change in inter-finger distance (fingers spreading/together).
+        // Scroll = centroid movement (fingers translating together).
+        if (twoFingerMode == TwoFingerMode.UNDECIDED) {
+            val distChange = abs(currentFingerDist - initialFingerDistance)
             val totalMoveX = abs(currentCentroidX - initialCentroidX)
             val totalMoveY = abs(currentCentroidY - initialCentroidY)
-            if (totalMoveX > scrollAxisLockThresholdPx || totalMoveY > scrollAxisLockThresholdPx) {
-                isHorizontalScroll = totalMoveX > totalMoveY
-                scrollAxisLocked = true
-                Log.d(TAG, "Scroll axis locked: ${if (isHorizontalScroll) "HORIZONTAL" else "VERTICAL"}")
+            when {
+                distChange > pinchDistanceThresholdPx -> {
+                    twoFingerMode = TwoFingerMode.PINCH
+                    Log.d(TAG, "Two-finger mode: PINCH (distChange=$distChange)")
+                    holdCtrlForPinch()
+                    previousFingerDistance = currentFingerDist
+                    pinchAccumulator = 0f
+                }
+                totalMoveX > scrollAxisLockThresholdPx || totalMoveY > scrollAxisLockThresholdPx -> {
+                    twoFingerMode = TwoFingerMode.SCROLL
+                    isHorizontalScroll = totalMoveX > totalMoveY
+                    scrollAxisLocked = true
+                    Log.d(TAG, "Two-finger mode: SCROLL (${if (isHorizontalScroll) "HORIZONTAL" else "VERTICAL"})")
+                }
             }
+        }
+
+        if (twoFingerMode == TwoFingerMode.PINCH) {
+            handlePinchDelta(currentFingerDist)
+            previousCentroidY = currentCentroidY
+            previousCentroidX = currentCentroidX
+            return
         }
 
         val deltaY = currentCentroidY - previousCentroidY
@@ -981,7 +1076,7 @@ class MainActivity : ComponentActivity() {
         // Only update velocity for the locked axis. The tick loop drives the
         // accumulator from this smoothed velocity, decoupling touch event
         // jitter (5-30 ms delivery gaps) from the wheel output cadence.
-        if (scrollAxisLocked && dtMs > 0) {
+        if (twoFingerMode == TwoFingerMode.SCROLL && scrollAxisLocked && dtMs > 0) {
             if (isHorizontalScroll) {
                 val instantVelocityX = deltaX / dtMs.toFloat()
                 scrollVelocityXPxPerMs = scrollVelocityXPxPerMs * (1f - SCROLL_VELOCITY_SMOOTHING) +
@@ -994,6 +1089,44 @@ class MainActivity : ComponentActivity() {
                 scrollVelocityXPxPerMs = 0f
             }
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun holdCtrlForPinch() {
+        if (ctrlHeldForPinch) return
+        ctrlHeldForPinch = true
+        sendKeyboardReport(KEY_MOD_LCTRL)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun releaseCtrlForPinch() {
+        if (!ctrlHeldForPinch) return
+        ctrlHeldForPinch = false
+        sendKeyboardReport(0x00)
+    }
+
+    private fun handlePinchDelta(currentFingerDist: Float) {
+        val deltaDist = currentFingerDist - previousFingerDistance
+        previousFingerDistance = currentFingerDist
+        pinchAccumulator += deltaDist
+
+        val steps = (pinchAccumulator / pinchPixelsPerStep).toInt()
+        if (steps != 0) {
+            pinchAccumulator -= steps * pinchPixelsPerStep
+            val wheel = steps.coerceIn(-127, 127)
+            // Ctrl is already held; wheel becomes zoom on Windows.
+            sendMouseReport(0x00, 0, 0, wheel, 0)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendKeyboardReport(modifier: Byte, key1: Byte = 0, key2: Byte = 0,
+                                    key3: Byte = 0, key4: Byte = 0, key5: Byte = 0, key6: Byte = 0) {
+        val hid = hidDevice ?: return
+        val device = connectedDevice ?: return
+        val report = byteArrayOf(modifier, 0x00, key1, key2, key3, key4, key5, key6)
+        val ok = hid.sendReport(device, KEYBOARD_REPORT_ID, report)
+        if (!ok) Log.w(TAG, "sendKeyboardReport failed: modifier=$modifier")
     }
 
     private fun handleSingleFingerDown(event: MotionEvent): Boolean {
@@ -1251,7 +1384,7 @@ fun PhonePadScreen(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isConnected) "Move one finger to control cursor\nTap to click\nHold to drag\nTwo fingers to scroll\nTwo-finger tap to right-click"
+                text = if (isConnected) "Move one finger to control cursor\nTap to click\nHold to drag\nTwo fingers to scroll (vertical or horizontal)\nTwo-finger tap to right-click\nPinch in/out to zoom"
                        else "Not connected",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
