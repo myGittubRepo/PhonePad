@@ -76,6 +76,10 @@ class MainActivity : ComponentActivity() {
         private const val SCROLL_MOMENTUM_MIN_VELOCITY = 0.01f
         private const val SCROLL_MOMENTUM_RELEASE_GRACE_MS = 150L
 
+        // Two-finger tap → right-click
+        private const val TWO_FINGER_TAP_DURATION_MS = 300L
+        private const val TWO_FINGER_TAP_MOVEMENT_DP = 15f
+
         private const val RESOLUTION_MULTIPLIER_PHYSICAL_MIN = 1
         private const val RESOLUTION_MULTIPLIER_PHYSICAL_MAX = 8
         private const val FEATURE_REPORT_ID: Byte = 2
@@ -106,6 +110,7 @@ class MainActivity : ComponentActivity() {
     private var touchDownX = 0f
     private var touchDownY = 0f
     private var tapMovementThresholdPx = 0f
+    private var twoFingerTapMovementThresholdPx = 0f
     private var tapEligible = false
 
     // Milestone 4 drag
@@ -137,6 +142,17 @@ class MainActivity : ComponentActivity() {
     // High-resolution wheel
     private var wheelResolutionMultiplierRaw = 0
     private var effectiveWheelMultiplier = 1
+
+    // Milestone 2.3 two-finger tap = right-click
+    private var twoFingerDownTime = 0L
+    private var twoFingerTapPointerId0 = -1
+    private var twoFingerTapPointerId1 = -1
+    private var twoFingerDownX0 = 0f
+    private var twoFingerDownY0 = 0f
+    private var twoFingerDownX1 = 0f
+    private var twoFingerDownY1 = 0f
+    private var twoFingerTapEligible = false
+    private var rightClickFiredInGesture = false
 
     // Mouse HID report descriptor: 3 buttons, relative X/Y, vertical wheel
     // with Resolution Multiplier Feature Report for high-resolution scrolling.
@@ -366,6 +382,7 @@ class MainActivity : ComponentActivity() {
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         tapMovementThresholdPx = TAP_MOVEMENT_DP * resources.displayMetrics.density
+        twoFingerTapMovementThresholdPx = TWO_FINGER_TAP_MOVEMENT_DP * resources.displayMetrics.density
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -533,6 +550,8 @@ class MainActivity : ComponentActivity() {
         scrollVelocityPxPerMs = 0f
         lastScrollEventTime = 0L
         pointerUpTime = 0L
+        twoFingerTapEligible = false
+        rightClickFiredInGesture = false
     }
 
     private fun resetWheelMultiplier() {
@@ -762,6 +781,16 @@ class MainActivity : ComponentActivity() {
             }
             MotionEvent.ACTION_POINTER_UP -> {
                 if (isTwoFingerScrolling) {
+                    val duration = SystemClock.uptimeMillis() - twoFingerDownTime
+                    if (twoFingerTapEligible && duration <= TWO_FINGER_TAP_DURATION_MS) {
+                        Log.d(TAG, "Two-finger tap detected: duration=${duration}ms → right-click")
+                        sendRightClick()
+                        rightClickFiredInGesture = true
+                        scrollVelocityPxPerMs = 0f
+                        scrollAccumulator = 0f
+                    } else {
+                        Log.d(TAG, "Two-finger tap NOT fired: eligible=$twoFingerTapEligible, duration=${duration}ms (max ${TWO_FINGER_TAP_DURATION_MS})")
+                    }
                     endTwoFingerScroll()
                 }
                 return true
@@ -770,11 +799,11 @@ class MainActivity : ComponentActivity() {
                 if (gestureContainedMultiTouch) {
                     fingerDown = false
                     val timeSincePointerUp = SystemClock.uptimeMillis() - pointerUpTime
-                    if (pointerUpTime > 0 && timeSincePointerUp <= SCROLL_MOMENTUM_RELEASE_GRACE_MS) {
+                    if (!rightClickFiredInGesture && pointerUpTime > 0 && timeSincePointerUp <= SCROLL_MOMENTUM_RELEASE_GRACE_MS) {
                         Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first, starting momentum")
                         startMomentum()
                     } else {
-                        Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first (stale), no momentum")
+                        Log.d(TAG, "Final finger lifted ${timeSincePointerUp}ms after first (stale or right-click), no momentum")
                         scrollVelocityPxPerMs = 0f
                         scrollAccumulator = 0f
                     }
@@ -795,6 +824,8 @@ class MainActivity : ComponentActivity() {
                 tapEligible = false
                 dragEligible = false
                 gestureContainedMultiTouch = false
+                twoFingerTapEligible = false
+                rightClickFiredInGesture = false
                 scrollAccumulator = 0f
                 scrollVelocityPxPerMs = 0f
                 Log.d(TAG, "Touch cancelled")
@@ -821,14 +852,26 @@ class MainActivity : ComponentActivity() {
     private fun beginTwoFingerScroll(event: MotionEvent) {
         val y0 = event.getY(0)
         val y1 = event.getY(1)
+        val x0 = event.getX(0)
+        val x1 = event.getX(1)
         previousCentroidY = (y0 + y1) / 2f
         scrollAccumulator = 0f
         scrollVelocityPxPerMs = 0f
         lastScrollEventTime = event.eventTime
         pointerUpTime = 0L
         isTwoFingerScrolling = true
+
+        // Two-finger tap tracking
+        twoFingerDownTime = SystemClock.uptimeMillis()
+        twoFingerTapPointerId0 = event.getPointerId(0)
+        twoFingerTapPointerId1 = event.getPointerId(1)
+        twoFingerDownX0 = x0; twoFingerDownY0 = y0
+        twoFingerDownX1 = x1; twoFingerDownY1 = y1
+        twoFingerTapEligible = true
+        rightClickFiredInGesture = false
+
         startScrollOutputLoop()
-        Log.d(TAG, "Two-finger scroll started")
+        Log.d(TAG, "Two-finger gesture started (scroll + tap-eligible)")
     }
 
     private fun endTwoFingerScroll() {
@@ -840,6 +883,24 @@ class MainActivity : ComponentActivity() {
 
     private fun handleTwoFingerScrollInput(event: MotionEvent) {
         if (event.pointerCount != 2) return
+
+        // Two-finger tap tracking: if either finger has moved beyond the tap
+        // movement threshold since it came down, this is no longer eligible
+        // to fire a right-click on lift.
+        if (twoFingerTapEligible) {
+            val idx0 = event.findPointerIndex(twoFingerTapPointerId0)
+            val idx1 = event.findPointerIndex(twoFingerTapPointerId1)
+            if (idx0 >= 0) {
+                val dx = event.getX(idx0) - twoFingerDownX0
+                val dy = event.getY(idx0) - twoFingerDownY0
+                if (sqrt(dx * dx + dy * dy) > twoFingerTapMovementThresholdPx) twoFingerTapEligible = false
+            }
+            if (twoFingerTapEligible && idx1 >= 0) {
+                val dx = event.getX(idx1) - twoFingerDownX1
+                val dy = event.getY(idx1) - twoFingerDownY1
+                if (sqrt(dx * dx + dy * dy) > twoFingerTapMovementThresholdPx) twoFingerTapEligible = false
+            }
+        }
 
         val y0 = event.getY(0)
         val y1 = event.getY(1)
@@ -981,6 +1042,22 @@ class MainActivity : ComponentActivity() {
     }
 
     @SuppressLint("MissingPermission")
+    private fun sendRightClick() {
+        val hid = hidDevice ?: return
+        val device = connectedDevice ?: return
+
+        val down = byteArrayOf(0x02.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+        val up = byteArrayOf(0x00.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
+
+        val downResult = hid.sendReport(device, INPUT_REPORT_ID, down)
+        val upResult = hid.sendReport(device, INPUT_REPORT_ID, up)
+
+        if (!downResult || !upResult) {
+            Log.w(TAG, "sendRightClick failed: down=$downResult, up=$upResult")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     private fun releaseLeftButton() {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
@@ -1098,7 +1175,7 @@ fun PhonePadScreen(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isConnected) "Move one finger to control cursor\nTap to click\nHold to drag\nTwo fingers to scroll"
+                text = if (isConnected) "Move one finger to control cursor\nTap to click\nHold to drag\nTwo fingers to scroll\nTwo-finger tap to right-click"
                        else "Not connected",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
