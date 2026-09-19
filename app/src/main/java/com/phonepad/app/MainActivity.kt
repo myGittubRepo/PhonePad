@@ -71,12 +71,16 @@ class MainActivity : ComponentActivity() {
         private const val SCROLL_PIXELS_PER_NOTCH = 12f
         private const val SCROLL_DIRECTION = 1
         private const val SCROLL_DIRECTION_H = -1
-        private const val SCROLL_OUTPUT_INTERVAL_MS = 16L
-        private const val SCROLL_VELOCITY_SMOOTHING = 0.35f
+        private const val SCROLL_OUTPUT_INTERVAL_MS = 8L
+        private const val SCROLL_VELOCITY_SMOOTHING = 0.5f
         private const val SCROLL_MOMENTUM_FRICTION = 0.94f
         private const val SCROLL_MOMENTUM_MIN_VELOCITY = 0.05f
         private const val SCROLL_MOMENTUM_RELEASE_GRACE_MS = 150L
         private const val SCROLL_AXIS_LOCK_THRESHOLD_DP = 8f
+
+        // Milestone 4.1 cursor output cadence & smoothing
+        private const val CURSOR_OUTPUT_INTERVAL_MS = 8L
+        private const val CURSOR_VELOCITY_SMOOTHING = 0.5f
 
         // Two-finger tap → right-click
         private const val TWO_FINGER_TAP_DURATION_MS = 300L
@@ -151,6 +155,13 @@ class MainActivity : ComponentActivity() {
     private var autoReconnectAttempted = false
     private var bluetoothReceiverRegistered = false
     private var isHidAppRegistered = false
+
+    // Milestone 4.1 cursor output cadence & smoothing
+    private var cursorVelocityX = 0f
+    private var cursorVelocityY = 0f
+    private var cursorOutputActive = false
+    private var previousCursorTickTime = 0L
+    private val cursorTickRunnable = Runnable { tickCursorOutput() }
 
     // Milestone 2.1 two-finger scroll (vertical)
     private var isTwoFingerScrolling = false
@@ -890,6 +901,7 @@ class MainActivity : ComponentActivity() {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 stopScrollOutput()
+                stopCursorOutput()
                 scrollAccumulator = 0f; scrollAccumulatorX = 0f
                 scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
                 isTwoFingerScrolling = false
@@ -979,6 +991,7 @@ class MainActivity : ComponentActivity() {
                     endMultiFingerGesture()
                 }
                 stopScrollOutput()
+                stopCursorOutput()
                 handler.removeCallbacks(dragTriggerRunnable)
                 fingerDown = false
                 isTwoFingerScrolling = false
@@ -1011,6 +1024,7 @@ class MainActivity : ComponentActivity() {
         tapEligible = false
         dragEligible = false
         handler.removeCallbacks(dragTriggerRunnable)
+        stopCursorOutput()
 
         if (isDragging) {
             Log.d(TAG, "Drag cancelled: multi-touch detected")
@@ -1384,18 +1398,60 @@ class MainActivity : ComponentActivity() {
 
         val (accX, accY) = applyAcceleration(dx, dy, dtMs)
 
-        if (accX != 0 || accY != 0) {
+        val alpha = CURSOR_VELOCITY_SMOOTHING
+        cursorVelocityX = alpha * accX + (1 - alpha) * cursorVelocityX
+        cursorVelocityY = alpha * accY + (1 - alpha) * cursorVelocityY
+
+        startCursorOutput()
+        return true
+    }
+
+    private fun startCursorOutput() {
+        if (cursorOutputActive) return
+        cursorOutputActive = true
+        previousCursorTickTime = SystemClock.uptimeMillis()
+        handler.post(cursorTickRunnable)
+    }
+
+    private fun stopCursorOutput() {
+        cursorOutputActive = false
+        handler.removeCallbacks(cursorTickRunnable)
+        cursorVelocityX = 0f
+        cursorVelocityY = 0f
+    }
+
+    private fun tickCursorOutput() {
+        if (!cursorOutputActive) return
+
+        val now = SystemClock.uptimeMillis()
+        val dt = (now - previousCursorTickTime).toFloat()
+        previousCursorTickTime = now
+
+        val outX = (cursorVelocityX * dt / CURSOR_OUTPUT_INTERVAL_MS).toInt().coerceIn(-127, 127)
+        val outY = (cursorVelocityY * dt / CURSOR_OUTPUT_INTERVAL_MS).toInt().coerceIn(-127, 127)
+
+        if (outX != 0 || outY != 0) {
             if (isDragging) {
-                sendMouseReport(0x01, accX, accY)
+                sendMouseReport(0x01, outX, outY)
             } else {
-                sendMouseReport(0x00, accX, accY)
+                sendMouseReport(0x00, outX, outY)
             }
         }
-        return true
+
+        cursorVelocityX *= 0.6f
+        cursorVelocityY *= 0.6f
+
+        if (abs(cursorVelocityX) < 0.1f && abs(cursorVelocityY) < 0.1f) {
+            stopCursorOutput()
+            return
+        }
+
+        handler.postDelayed(cursorTickRunnable, CURSOR_OUTPUT_INTERVAL_MS)
     }
 
     private fun handleSingleFingerUp(): Boolean {
         handler.removeCallbacks(dragTriggerRunnable)
+        stopCursorOutput()
         fingerDown = false
 
         if (isDragging) {
@@ -1438,9 +1494,9 @@ class MainActivity : ComponentActivity() {
         val speed = distance / dt
 
         val gain = when {
-            speed <= 1.0f -> 0.8f
-            speed <= 4.0f -> 0.8f + (speed - 1.0f) * (1.5f - 0.8f) / (4.0f - 1.0f)
-            else -> 2.2f
+            speed <= 1.0f -> 0.5f
+            speed <= 4.0f -> 0.5f + (speed - 1.0f) * (1.0f - 0.5f) / (4.0f - 1.0f)
+            else -> 1.4f
         }
 
         val outX = (dx * gain).toInt().coerceIn(-127, 127)
