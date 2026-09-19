@@ -1,0 +1,97 @@
+═══════════════════════════════════════════════════
+PHONEPAD — PLAY STORE LISTING
+═══════════════════════════════════════════════════
+
+APP NAME (30 chars max):
+PhonePad – Bluetooth Trackpad
+
+SHORT DESCRIPTION (80 chars max):
+Turn your phone into a wireless trackpad for your Windows PC. No app on PC needed.
+
+FULL DESCRIPTION (4000 chars max):
+PhonePad turns your Android phone into a precision Bluetooth trackpad for your Windows PC — no companion app, no Wi-Fi, no USB cable. Just pair and go.
+
+Your phone connects directly to your PC as a standard Bluetooth mouse using the HID Device profile. Windows sees it as a native input device, so there's nothing to install on your computer. It works out of the box with any Windows PC that has Bluetooth.
+
+TRACKPAD FEATURES
+• Smooth cursor movement with three-tier pointer acceleration
+• Tap-to-click for left click
+• Two-finger tap for right click
+• Two-finger scroll (vertical and horizontal)
+• Three-finger gestures for task switching
+• Four-finger gestures for desktop management
+• Adjustable sensitivity to match your preference
+• Natural scroll option (like a MacBook trackpad)
+
+DESIGNED FOR COMFORT
+• Full-screen trackpad surface — your entire screen is the touch area
+• Immersive mode hides status and navigation bars
+• Three dark themes: Dark, Darker, and AMOLED Black
+• Haptic feedback on taps, scrolls, and gestures
+• Touch ripple effect (optional)
+
+WORKS WITH YOUR SETUP
+• Connects via Bluetooth — no Wi-Fi network required
+• No companion app or server needed on your PC
+• Manages multiple paired PCs with per-device settings
+• Rename your devices for quick identification
+• Automatic reconnection when your PC comes back in range
+
+BUILT-IN GESTURE GUIDE
+• Interactive reference for all supported gestures
+• Collapsible sections for movement, clicks, scrolling, and multi-finger gestures
+• Always accessible from the trackpad screen
+
+PRIVACY FIRST
+• No internet permission — PhonePad never connects to the internet
+• No data collection, no analytics, no ads
+• All settings stored locally on your device
+• Open source
+
+REQUIREMENTS
+• Android 9 (Pie) or later
+• Windows PC with Bluetooth
+• Bluetooth permissions on your phone
+
+Perfect for presentations, couch computing, media PCs, or anytime your mouse isn't within reach.
+
+CATEGORY:
+Tools
+
+CONTENT RATING:
+Everyone
+
+TAGS / KEYWORDS:
+bluetooth trackpad, wireless mouse, phone trackpad, remote mouse,
+bluetooth mouse, pc trackpad, phone as mouse, wireless trackpad,
+HID device, phone mouse, remote control, touchpad
+
+═══════════════════════════════════════════════════
+PLAY STORE SCREENSHOTS — CAPTURE GUIDE
+═══════════════════════════════════════════════════
+
+Capture 5 screenshots at 1080x1920 (or 1080x2400 for taller phones).
+Use the running app on a real device for authentic results.
+
+Screenshot 1 — "Your phone is now a trackpad"
+  → Show the trackpad surface with the connection pill showing a connected device.
+  → Overlay text at top: "Your phone is now a trackpad"
+
+Screenshot 2 — "Tap, scroll, swipe — all the gestures"
+  → Open the Gesture Guide bottom sheet (tap the ? icon).
+  → Overlay text at top: "Tap, scroll, swipe"
+
+Screenshot 3 — "Customize everything"
+  → Open Settings overlay showing the sensitivity slider, toggles, and theme options.
+  → Overlay text at top: "Make it yours"
+
+Screenshot 4 — "Manage all your PCs"
+  → Open the Device Manager showing 2-3 paired devices.
+  → Overlay text at top: "Switch between PCs"
+
+Screenshot 5 — "No app needed on your PC"
+  → Show the pairing guide screen (first connection flow).
+  → Overlay text at top: "Just pair and go"
+
+Tip: Add overlay text and device frames using a tool like
+screenshots.pro, Previewed, or Android Studio's screenshot framing.

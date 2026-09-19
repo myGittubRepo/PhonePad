@@ -65,6 +65,109 @@ import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
 
+import android.net.Uri
+import android.os.BatteryManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.provider.Settings as AndroidSettings
+import android.view.HapticFeedbackConstants
+import android.view.View
+import android.view.WindowInsetsController
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothDisabled
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.animation.core.EaseInOutCubic
+import androidx.compose.animation.core.EaseOutBack
+import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.drawscope.translate
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.cos
+import kotlin.math.sin
+
+enum class AppScreen {
+    SPLASH, COMPAT_FAIL, ONBOARDING, PERMISSION, PERMISSION_DENIED, PAIRING_GUIDE, TRACKPAD
+}
+
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -77,6 +180,16 @@ class MainActivity : ComponentActivity() {
         private const val PREF_SENSITIVITY = "_sensitivity"
         private const val PREF_TAP_TO_CLICK = "_tap_to_click"
         private const val PREF_NATURAL_SCROLL = "_natural_scroll"
+        private const val PREF_RIPPLE_ENABLED = "_ripple_enabled"
+        private const val PREF_HAPTICS_ENABLED = "_haptics_enabled"
+        private const val PREF_STATUS_BAR_AUTO_HIDE = "status_bar_auto_hide"
+        private const val PREF_TRACKPAD_THEME = "trackpad_theme"
+        private const val PREF_DEVICE_NICKNAME = "_nickname"
+        private const val PREF_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
+        private const val PREF_GESTURE_GUIDE_SECTIONS = "gesture_guide_sections"
+
+        private const val EDGE_ZONE_DP = 20f
+        private const val AUTO_RECONNECT_TIMEOUT_MS = 10_000L
 
         private const val SCROLL_PIXELS_PER_NOTCH = 12f
         private const val SCROLL_DIRECTION = 1
@@ -176,6 +289,34 @@ class MainActivity : ComponentActivity() {
     private var tapToClickEnabled by mutableStateOf(true)
     private var naturalScrollEnabled by mutableStateOf(false)
     private var showSettings by mutableStateOf(false)
+    private var rippleEnabled by mutableStateOf(false)
+    private var hapticsEnabled by mutableStateOf(true)
+    private var statusBarAutoHide by mutableStateOf(true)
+    private var trackpadTheme by mutableStateOf("dark") // dark, darker, amoled
+
+    // Phase 1 UI navigation
+    private var currentScreen by mutableStateOf(AppScreen.SPLASH)
+
+    // Phase 2 trackpad surface state
+    private var showGestureGuide by mutableStateOf(false)
+    private var gestureGuideSectionsExpanded by mutableStateOf(
+        mapOf("1-finger" to true, "2-finger" to true, "3-finger" to true, "4-finger" to true)
+    )
+
+    // Phase 4 device manager
+    private var showDeviceManager by mutableStateOf(false)
+    private var deviceNicknames by mutableStateOf(mapOf<String, String>())
+
+    // Phase 5 error states
+    private var isBluetoothOff by mutableStateOf(false)
+    private var showDisconnectSheet by mutableStateOf(false)
+    private var disconnectAutoReconnectFailed by mutableStateOf(false)
+    private val disconnectTimerRunnable = Runnable {
+        if (connectedDevice == null && currentScreen == AppScreen.TRACKPAD) {
+            disconnectAutoReconnectFailed = true
+            showDisconnectSheet = true
+        }
+    }
 
     // Milestone 4.2 palm rejection
     private var palmTouchMajorThresholdPx = 0f
@@ -376,10 +517,13 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "Bluetooth permissions granted")
             permissionStatus = "Granted"
             ensureHidSession()
+            val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+            currentScreen = if (lastHost != null) AppScreen.TRACKPAD else AppScreen.PAIRING_GUIDE
         } else {
             Log.w(TAG, "Bluetooth permissions denied: $results")
             permissionStatus = "Denied"
             hidProfileStatus = "N/A (permission denied)"
+            currentScreen = AppScreen.PERMISSION_DENIED
         }
     }
 
@@ -414,6 +558,9 @@ class MainActivity : ComponentActivity() {
             when (state) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     connectedDevice = device
+                    handler.removeCallbacks(disconnectTimerRunnable)
+                    showDisconnectSheet = false
+                    disconnectAutoReconnectFailed = false
                     if (device != null) {
                         saveLastHost(device.address)
                         loadHostSettings(device.address)
@@ -424,7 +571,13 @@ class MainActivity : ComponentActivity() {
                     stopScrollOutput()
                     resetScrollState()
                     resetWheelMultiplier()
+                    val wasConnected = connectedDevice != null
                     connectedDevice = null
+                    if (wasConnected && currentScreen == AppScreen.TRACKPAD) {
+                        disconnectAutoReconnectFailed = false
+                        autoReconnectAttempted = false
+                        handler.postDelayed(disconnectTimerRunnable, AUTO_RECONNECT_TIMEOUT_MS)
+                    }
                 }
                 else -> {}
             }
@@ -500,6 +653,7 @@ class MainActivity : ComponentActivity() {
                 BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> {
                     Log.w(TAG, "Bluetooth STATE_OFF — cleaning up")
                     bluetoothStatus = if (state == BluetoothAdapter.STATE_OFF) "Bluetooth disabled" else "Turning off…"
+                    isBluetoothOff = true
                     cleanupDragState()
                     stopScrollOutput()
                     resetScrollState()
@@ -514,6 +668,7 @@ class MainActivity : ComponentActivity() {
                 BluetoothAdapter.STATE_ON -> {
                     Log.d(TAG, "Bluetooth STATE_ON — starting HID session recovery")
                     bluetoothStatus = "Enabled"
+                    isBluetoothOff = false
                     ensureHidSession()
                 }
             }
@@ -534,6 +689,10 @@ class MainActivity : ComponentActivity() {
         multiFingerTapMovementThresholdPx = MULTI_FINGER_TAP_MOVEMENT_DP * resources.displayMetrics.density
         palmTouchMajorThresholdPx = PALM_TOUCH_MAJOR_THRESHOLD_DP * resources.displayMetrics.density
         palmGraceMovementThresholdPx = PALM_GRACE_MOVEMENT_DP * resources.displayMetrics.density
+        loadGestureGuideSections()
+        loadDeviceNicknames()
+        statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
+        trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "dark") ?: "dark"
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -551,41 +710,148 @@ class MainActivity : ComponentActivity() {
         } else {
             Log.d(TAG, "BluetoothAdapter available")
             registerBluetoothReceiver()
-            if (!bluetoothAdapter!!.isEnabled) {
-                Log.w(TAG, "Bluetooth is disabled")
-                bluetoothStatus = "Bluetooth disabled"
-                requestBluetoothPermissions()
-            } else {
-                Log.d(TAG, "Bluetooth is enabled")
-                bluetoothStatus = "Enabled"
-                requestBluetoothPermissions()
-            }
+            bluetoothStatus = if (bluetoothAdapter!!.isEnabled) "Enabled" else "Bluetooth disabled"
+            isBluetoothOff = !bluetoothAdapter!!.isEnabled
         }
+
+        currentScreen = AppScreen.SPLASH
+        handler.postDelayed({ routeFromSplash() }, 2800L)
 
         setContent {
             PhonePadTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    PhonePadScreen(
-                        bluetoothStatus = bluetoothStatus,
-                        permissionStatus = permissionStatus,
-                        hidProfileStatus = hidProfileStatus,
-                        registrationStatus = registrationStatus,
-                        connectionStatus = connectionStatus,
-                        bondedDevices = bondedDevices,
-                        isConnected = connectedDevice != null,
-                        connectedHostName = connectedDevice?.name,
-                        onDeviceSelected = { device -> connectToDevice(device) },
-                        onTouchEvent = { event -> handleTrackpadTouch(event) },
-                        showSettings = showSettings,
-                        onToggleSettings = { showSettings = !showSettings },
-                        sensitivity = sensitivityMultiplier,
-                        onSensitivityChange = { sensitivityMultiplier = it; saveHostSettings() },
-                        tapToClick = tapToClickEnabled,
-                        onTapToClickChange = { tapToClickEnabled = it; saveHostSettings() },
-                        naturalScroll = naturalScrollEnabled,
-                        onNaturalScrollChange = { naturalScrollEnabled = it; saveHostSettings() },
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                    @Suppress("UnusedContentLambdaTargetStateParameter")
+                    AnimatedContent(
+                        targetState = currentScreen,
+                        transitionSpec = {
+                            if (initialState == AppScreen.SPLASH) {
+                                (fadeIn(tween(600)) + slideInVertically { -it / 12 }) togetherWith
+                                    fadeOut(tween(500))
+                            } else if (targetState == AppScreen.TRACKPAD) {
+                                (fadeIn(tween(400)) + slideInHorizontally { it / 4 }) togetherWith
+                                    (fadeOut(tween(300)) + slideOutHorizontally { -it / 4 })
+                            } else {
+                                (fadeIn(tween(350)) + slideInHorizontally { it / 6 }) togetherWith
+                                    (fadeOut(tween(250)) + slideOutHorizontally { -it / 6 })
+                            }
+                        },
+                        label = "screen"
+                    ) { screen ->
+                        when (screen) {
+                            AppScreen.SPLASH -> SplashScreen(
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            AppScreen.COMPAT_FAIL -> CompatFailScreen(
+                                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            AppScreen.ONBOARDING -> OnboardingScreen(
+                                onComplete = {
+                                    prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
+                                    if (hasBluetoothPermissions()) {
+                                        ensureHidSession()
+                                        val host = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+                                        currentScreen = if (host != null) AppScreen.TRACKPAD else AppScreen.PAIRING_GUIDE
+                                    } else {
+                                        currentScreen = AppScreen.PERMISSION
+                                    }
+                                },
+                                onSkip = {
+                                    prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
+                                    if (hasBluetoothPermissions()) {
+                                        ensureHidSession()
+                                        val host = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+                                        currentScreen = if (host != null) AppScreen.TRACKPAD else AppScreen.PAIRING_GUIDE
+                                    } else {
+                                        currentScreen = AppScreen.PERMISSION
+                                    }
+                                },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            AppScreen.PERMISSION -> PermissionScreen(
+                                onContinue = { requestBluetoothPermissions() },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            AppScreen.PERMISSION_DENIED -> PermissionDeniedScreen(
+                                onOpenSettings = { openAppSettings() },
+                                onTryAgain = { requestBluetoothPermissions() },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            AppScreen.PAIRING_GUIDE -> PairingGuideScreen(
+                                connectionStatus = connectionStatus,
+                                isConnected = connectedDevice != null,
+                                connectedHostName = connectedDevice?.name,
+                                onNavigateToTrackpad = { currentScreen = AppScreen.TRACKPAD },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            AppScreen.TRACKPAD -> TrackpadScreen(
+                                connectionStatus = connectionStatus,
+                                bondedDevices = bondedDevices,
+                                isConnected = connectedDevice != null,
+                                connectedHostName = connectedDevice?.let { getDeviceDisplayName(it) },
+                                onDeviceSelected = { device -> connectToDevice(device) },
+                                onTouchEvent = { event -> handleTrackpadTouch(event) },
+                                showSettings = showSettings,
+                                onToggleSettings = { showSettings = !showSettings },
+                                sensitivity = sensitivityMultiplier,
+                                onSensitivityChange = { sensitivityMultiplier = it; saveHostSettings() },
+                                tapToClick = tapToClickEnabled,
+                                onTapToClickChange = { tapToClickEnabled = it; saveHostSettings() },
+                                naturalScroll = naturalScrollEnabled,
+                                onNaturalScrollChange = { naturalScrollEnabled = it; saveHostSettings() },
+                                rippleEnabled = rippleEnabled,
+                                onRippleChange = { rippleEnabled = it; saveHostSettings() },
+                                hapticsEnabled = hapticsEnabled,
+                                onHapticsChange = { hapticsEnabled = it; saveHostSettings() },
+                                statusBarAutoHide = statusBarAutoHide,
+                                onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
+                                trackpadTheme = trackpadTheme,
+                                onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
+                                batteryPercent = getBatteryPercent(),
+                                showGestureGuide = showGestureGuide,
+                                onToggleGestureGuide = { showGestureGuide = !showGestureGuide },
+                                onDismissGestureGuide = { showGestureGuide = false },
+                                gestureGuideSections = gestureGuideSectionsExpanded,
+                                onToggleGestureSection = { section ->
+                                    gestureGuideSectionsExpanded = gestureGuideSectionsExpanded.toMutableMap().apply {
+                                        put(section, !(get(section) ?: true))
+                                    }
+                                    saveGestureGuideSections()
+                                },
+                                showDeviceManager = showDeviceManager,
+                                onToggleDeviceManager = { showDeviceManager = !showDeviceManager },
+                                onDismissDeviceManager = { showDeviceManager = false },
+                                deviceNicknames = deviceNicknames,
+                                onRenameDevice = { addr, name -> saveDeviceNickname(addr, name) },
+                                onForgetDevice = { device -> forgetDevice(device) },
+                                onNavigateToPairingGuide = {
+                                    showDeviceManager = false
+                                    showSettings = false
+                                    currentScreen = AppScreen.PAIRING_GUIDE
+                                },
+                                isBluetoothOff = isBluetoothOff,
+                                onTurnOnBluetooth = {
+                                    try {
+                                        startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
+                                    } catch (_: Exception) {}
+                                },
+                                showDisconnectSheet = showDisconnectSheet,
+                                disconnectAutoReconnectFailed = disconnectAutoReconnectFailed,
+                                onDismissDisconnectSheet = { showDisconnectSheet = false },
+                                onRetryConnect = {
+                                    showDisconnectSheet = false
+                                    disconnectAutoReconnectFailed = false
+                                    autoReconnectAttempted = false
+                                    ensureHidSession()
+                                },
+                                appVersion = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" },
+                                hasBluetoothPermissions = hasBluetoothPermissions(),
+                                onRequestPermissions = { requestBluetoothPermissions() },
+                                onOpenAppSettings = { openAppSettings() },
+                                modifier = Modifier
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -594,6 +860,16 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Log.d(TAG, "onResume: checking HID session recovery")
+
+        // If user returned from system Settings and permissions are now granted
+        if (currentScreen == AppScreen.PERMISSION_DENIED && hasBluetoothPermissions()) {
+            Log.d(TAG, "onResume: permissions granted from Settings, proceeding")
+            permissionStatus = "Granted"
+            ensureHidSession()
+            val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+            currentScreen = if (lastHost != null) AppScreen.TRACKPAD else AppScreen.PAIRING_GUIDE
+        }
+
         if (connectedDevice == null) {
             Log.d(TAG, "onResume: no active connection — resetting autoReconnectAttempted")
             autoReconnectAttempted = false
@@ -608,6 +884,7 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "onDestroy: cleaning up")
         unregisterBluetoothReceiver()
         handler.removeCallbacks(dragTriggerRunnable)
+        handler.removeCallbacks(disconnectTimerRunnable)
         stopScrollOutput()
         cleanupDragState()
         hidDevice?.let { hid ->
@@ -831,7 +1108,12 @@ class MainActivity : ComponentActivity() {
         sensitivityMultiplier = prefs.getFloat(address + PREF_SENSITIVITY, 1.0f)
         tapToClickEnabled = prefs.getBoolean(address + PREF_TAP_TO_CLICK, true)
         naturalScrollEnabled = prefs.getBoolean(address + PREF_NATURAL_SCROLL, false)
-        Log.d(TAG, "Loaded settings for $address: sensitivity=$sensitivityMultiplier, tapToClick=$tapToClickEnabled, naturalScroll=$naturalScrollEnabled")
+        rippleEnabled = prefs.getBoolean(address + PREF_RIPPLE_ENABLED, false)
+        hapticsEnabled = prefs.getBoolean(address + PREF_HAPTICS_ENABLED, true)
+        statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
+        trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "dark") ?: "dark"
+        loadDeviceNicknames()
+        Log.d(TAG, "Loaded settings for $address: sensitivity=$sensitivityMultiplier, tapToClick=$tapToClickEnabled, naturalScroll=$naturalScrollEnabled, ripple=$rippleEnabled, haptics=$hapticsEnabled")
     }
 
     private fun saveHostSettings() {
@@ -840,8 +1122,93 @@ class MainActivity : ComponentActivity() {
             .putFloat(address + PREF_SENSITIVITY, sensitivityMultiplier)
             .putBoolean(address + PREF_TAP_TO_CLICK, tapToClickEnabled)
             .putBoolean(address + PREF_NATURAL_SCROLL, naturalScrollEnabled)
+            .putBoolean(address + PREF_RIPPLE_ENABLED, rippleEnabled)
+            .putBoolean(address + PREF_HAPTICS_ENABLED, hapticsEnabled)
             .apply()
         Log.d(TAG, "Saved settings for $address")
+    }
+
+    private fun saveGlobalSettings() {
+        prefs.edit()
+            .putBoolean(PREF_STATUS_BAR_AUTO_HIDE, statusBarAutoHide)
+            .putString(PREF_TRACKPAD_THEME, trackpadTheme)
+            .apply()
+    }
+
+    private fun loadDeviceNicknames() {
+        val map = mutableMapOf<String, String>()
+        prefs.all.forEach { (key, value) ->
+            if (key.endsWith(PREF_DEVICE_NICKNAME) && value is String) {
+                val addr = key.removeSuffix(PREF_DEVICE_NICKNAME)
+                map[addr] = value
+            }
+        }
+        deviceNicknames = map
+    }
+
+    private fun saveDeviceNickname(address: String, name: String) {
+        prefs.edit().putString(address + PREF_DEVICE_NICKNAME, name).apply()
+        deviceNicknames = deviceNicknames.toMutableMap().apply { put(address, name) }
+    }
+
+    private fun removeDeviceNickname(address: String) {
+        prefs.edit().remove(address + PREF_DEVICE_NICKNAME).apply()
+        deviceNicknames = deviceNicknames.toMutableMap().apply { remove(address) }
+    }
+
+    private fun getDeviceDisplayName(device: BluetoothDevice): String {
+        return deviceNicknames[device.address] ?: device.name ?: device.address
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun forgetDevice(device: BluetoothDevice) {
+        try {
+            val method = device.javaClass.getMethod("removeBond")
+            method.invoke(device)
+            removeDeviceNickname(device.address)
+            prefs.edit()
+                .remove(device.address + PREF_SENSITIVITY)
+                .remove(device.address + PREF_TAP_TO_CLICK)
+                .remove(device.address + PREF_NATURAL_SCROLL)
+                .remove(device.address + PREF_RIPPLE_ENABLED)
+                .remove(device.address + PREF_HAPTICS_ENABLED)
+                .apply()
+            val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+            if (lastHost == device.address) {
+                prefs.edit().remove(PREF_LAST_HOST_ADDRESS).apply()
+            }
+            refreshBondedDevices()
+            Log.d(TAG, "Forgot device: ${device.address}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to forget device: ${e.message}")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun refreshBondedDevices() {
+        val adapter = bluetoothAdapter ?: return
+        bondedDevices.clear()
+        bondedDevices.addAll(adapter.bondedDevices.orEmpty())
+    }
+
+    private fun saveGestureGuideSections() {
+        val encoded = gestureGuideSectionsExpanded.entries.joinToString(",") { "${it.key}=${it.value}" }
+        prefs.edit().putString(PREF_GESTURE_GUIDE_SECTIONS, encoded).apply()
+    }
+
+    private fun loadGestureGuideSections() {
+        val raw = prefs.getString(PREF_GESTURE_GUIDE_SECTIONS, null) ?: return
+        val map = mutableMapOf<String, Boolean>()
+        raw.split(",").forEach { entry ->
+            val parts = entry.split("=")
+            if (parts.size == 2) map[parts[0]] = parts[1].toBooleanStrictOrNull() ?: true
+        }
+        if (map.isNotEmpty()) gestureGuideSectionsExpanded = map
+    }
+
+    private fun getBatteryPercent(): Int {
+        val bm = getSystemService(BatteryManager::class.java) ?: return -1
+        return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
     }
 
     @SuppressLint("MissingPermission")
@@ -905,6 +1272,40 @@ class MainActivity : ComponentActivity() {
             permissionStatus = "Granted (pre-Android 12)"
             ensureHidSession()
         }
+    }
+
+    private fun routeFromSplash() {
+        if (bluetoothAdapter == null) {
+            Log.d(TAG, "routeFromSplash: no adapter — COMPAT_FAIL")
+            currentScreen = AppScreen.COMPAT_FAIL
+            return
+        }
+        if (!prefs.getBoolean(PREF_HAS_SEEN_ONBOARDING, false)) {
+            Log.d(TAG, "routeFromSplash: first launch — ONBOARDING")
+            currentScreen = AppScreen.ONBOARDING
+            return
+        }
+        if (hasBluetoothPermissions()) {
+            ensureHidSession()
+            val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+            if (lastHost != null) {
+                Log.d(TAG, "routeFromSplash: returning user with paired device — TRACKPAD")
+                currentScreen = AppScreen.TRACKPAD
+            } else {
+                Log.d(TAG, "routeFromSplash: returning user, no paired device — PAIRING_GUIDE")
+                currentScreen = AppScreen.PAIRING_GUIDE
+            }
+        } else {
+            Log.d(TAG, "routeFromSplash: returning user, no permissions — PERMISSION")
+            currentScreen = AppScreen.PERMISSION
+        }
+    }
+
+    private fun openAppSettings() {
+        val intent = Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+        }
+        startActivity(intent)
     }
 
     @SuppressLint("MissingPermission")
@@ -1002,6 +1403,7 @@ class MainActivity : ComponentActivity() {
                     val duration = SystemClock.uptimeMillis() - twoFingerDownTime
                     if (twoFingerTapEligible && duration <= TWO_FINGER_TAP_DURATION_MS) {
                         Log.d(TAG, "Two-finger tap detected: duration=${duration}ms → right-click")
+                        performHaptic(HapticFeedbackConstants.CONFIRM)
                         sendRightClick()
                         rightClickFiredInGesture = true
                         scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
@@ -1128,6 +1530,7 @@ class MainActivity : ComponentActivity() {
         rightClickFiredInGesture = false
 
         startScrollOutputLoop()
+        performHaptic(HapticFeedbackConstants.CLOCK_TICK)
         Log.d(TAG, "Two-finger gesture started (scroll + tap-eligible)")
     }
 
@@ -1412,6 +1815,9 @@ class MainActivity : ComponentActivity() {
                 summary = "no action (n=$multiFingerMaxCount dx=$dxI dy=$dyI dur=${duration}ms)"
             }
         }
+        if (kind != "NONE") {
+            performHaptic(HapticFeedbackConstants.LONG_PRESS)
+        }
         Log.d(TAG, "Multi-finger: $summary")
         multiFingerActive = false
         multiFingerMaxCount = 0
@@ -1579,6 +1985,7 @@ class MainActivity : ComponentActivity() {
                 }
                 else -> {
                     Log.d(TAG, "Tap detected: duration=${duration}ms")
+                    performHaptic(HapticFeedbackConstants.CONFIRM)
                     sendLeftClick()
                 }
             }
@@ -1616,6 +2023,24 @@ class MainActivity : ComponentActivity() {
     }
 
     @SuppressLint("MissingPermission")
+    private fun performHaptic(type: Int) {
+        if (!hapticsEnabled) return
+        try {
+            val vibrator = getSystemService(Vibrator::class.java) ?: return
+            when (type) {
+                HapticFeedbackConstants.CONFIRM -> {
+                    vibrator.vibrate(VibrationEffect.createOneShot(15, VibrationEffect.DEFAULT_AMPLITUDE))
+                }
+                HapticFeedbackConstants.CLOCK_TICK -> {
+                    vibrator.vibrate(VibrationEffect.createOneShot(8, 80))
+                }
+                HapticFeedbackConstants.LONG_PRESS -> {
+                    vibrator.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE))
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun sendLeftClick() {
         val hid = hidDevice ?: return
         val device = connectedDevice ?: return
@@ -1679,14 +2104,1085 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Screen composables
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun SplashScreen(modifier: Modifier = Modifier) {
+    val trackpadProgress = remember { Animatable(0f) }
+    val cursorProgress = remember { Animatable(0f) }
+    val textAlpha = remember { Animatable(0f) }
+    val textSlide = remember { Animatable(20f) }
+    val glowAlpha = remember { Animatable(0f) }
+    val particleProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        launch { trackpadProgress.animateTo(1f, tween(1000, easing = EaseOutCubic)) }
+        delay(400)
+        launch { cursorProgress.animateTo(1f, tween(700, easing = EaseOutBack)) }
+        delay(300)
+        launch { glowAlpha.animateTo(0.6f, tween(600)) }
+        launch { particleProgress.animateTo(1f, tween(1200, easing = EaseOutCubic)) }
+        delay(200)
+        launch { textAlpha.animateTo(1f, tween(500)) }
+        launch { textSlide.animateTo(0f, tween(500, easing = EaseOutCubic)) }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "splashGlow")
+    val shimmer by infiniteTransition.animateFloat(
+        initialValue = -0.3f, targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing)),
+        label = "shimmer"
+    )
+    val glowPulse by infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
+        label = "glowPulse"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF1A1B4B)),
+        contentAlignment = Alignment.Center
+    ) {
+        // Ambient glow circles
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    listOf(Color(0xFF4B4FCF).copy(alpha = glowPulse * 0.15f), Color.Transparent),
+                    center = Offset(cx, cy - 40f),
+                    radius = size.minDimension * 0.6f
+                ),
+                radius = size.minDimension * 0.6f,
+                center = Offset(cx, cy - 40f)
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    listOf(Color(0xFF0D9488).copy(alpha = glowPulse * 0.08f), Color.Transparent),
+                    center = Offset(cx + 80f, cy + 60f),
+                    radius = size.minDimension * 0.4f
+                ),
+                radius = size.minDimension * 0.4f,
+                center = Offset(cx + 80f, cy + 60f)
+            )
+        }
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // Animated trackpad + cursor icon
+            Canvas(modifier = Modifier.size(140.dp)) {
+                val w = size.width
+                val h = size.height
+                val prog = trackpadProgress.value
+                val cProg = cursorProgress.value
+
+                // Trackpad body outline — draws on progressively
+                val trackpadPath = Path().apply {
+                    val l = w * 0.18f; val t = h * 0.1f
+                    val r = w * 0.82f; val b = h * 0.78f
+                    val cr = w * 0.08f
+                    moveTo(l + cr, t)
+                    lineTo(r - cr, t)
+                    cubicTo(r, t, r, t, r, t + cr)
+                    lineTo(r, b - cr)
+                    cubicTo(r, b, r, b, r - cr, b)
+                    lineTo(l + cr, b)
+                    cubicTo(l, b, l, b, l, b - cr)
+                    lineTo(l, t + cr)
+                    cubicTo(l, t, l, t, l + cr, t)
+                    close()
+                }
+                val pathMeasure = PathMeasure()
+                pathMeasure.setPath(trackpadPath, true)
+                val totalLength = pathMeasure.length
+                val drawnPath = Path()
+                pathMeasure.getSegment(0f, totalLength * prog, drawnPath)
+
+                // Glow behind trackpad
+                if (glowAlpha.value > 0f) {
+                    drawRoundRect(
+                        brush = Brush.radialGradient(
+                            listOf(
+                                Color(0xFF7B7FD4).copy(alpha = glowAlpha.value * 0.3f),
+                                Color.Transparent
+                            ),
+                            center = Offset(w / 2f, h * 0.44f),
+                            radius = w * 0.5f
+                        ),
+                        topLeft = Offset(w * 0.08f, h * 0.02f),
+                        size = Size(w * 0.84f, h * 0.84f),
+                        cornerRadius = CornerRadius(w * 0.08f)
+                    )
+                }
+
+                // Trackpad outline
+                drawPath(
+                    drawnPath,
+                    color = Color.White,
+                    style = Stroke(width = 3f, cap = StrokeCap.Round)
+                )
+
+                // Fill when fully drawn
+                if (prog > 0.95f) {
+                    val fillAlpha = ((prog - 0.95f) / 0.05f).coerceIn(0f, 1f) * 0.08f
+                    drawPath(trackpadPath, color = Color.White.copy(alpha = fillAlpha))
+                }
+
+                // Inner trackpad surface
+                if (prog > 0.5f) {
+                    val innerAlpha = ((prog - 0.5f) / 0.5f).coerceIn(0f, 1f) * 0.12f
+                    drawRoundRect(
+                        color = Color(0xFF7B7FD4).copy(alpha = innerAlpha),
+                        topLeft = Offset(w * 0.22f, h * 0.16f),
+                        size = Size(w * 0.56f, h * 0.52f),
+                        cornerRadius = CornerRadius(w * 0.04f)
+                    )
+                }
+
+                // Divider line
+                if (prog > 0.7f) {
+                    val divAlpha = ((prog - 0.7f) / 0.3f).coerceIn(0f, 1f)
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.3f * divAlpha),
+                        start = Offset(w * 0.25f, h * 0.66f),
+                        end = Offset(w * 0.75f, h * 0.66f),
+                        strokeWidth = 1.5f
+                    )
+                }
+
+                // Cursor arrow — scales in with bounce
+                if (cProg > 0f) {
+                    val cx = w * 0.52f
+                    val cy = h * 0.28f
+                    val cursorScale = cProg
+                    translate(
+                        left = cx - cx * cursorScale + cx,
+                        top = cy - cy * cursorScale + cy
+                    ) {
+                        val arrowPath = Path().apply {
+                            moveTo(cx - w * 0.02f, cy)
+                            lineTo(cx - w * 0.02f, cy + h * 0.22f)
+                            lineTo(cx + w * 0.04f, cy + h * 0.16f)
+                            lineTo(cx + w * 0.09f, cy + h * 0.26f)
+                            lineTo(cx + w * 0.13f, cy + h * 0.24f)
+                            lineTo(cx + w * 0.08f, cy + h * 0.14f)
+                            lineTo(cx + w * 0.14f, cy + h * 0.12f)
+                            close()
+                        }
+                        drawPath(arrowPath, color = Color(0xFF2DD4BF).copy(alpha = cProg))
+                    }
+                }
+
+                // Sparkle particles
+                if (particleProgress.value > 0f) {
+                    val pProg = particleProgress.value
+                    val sparkles = listOf(
+                        Offset(w * 0.15f, h * 0.2f), Offset(w * 0.85f, h * 0.15f),
+                        Offset(w * 0.9f, h * 0.6f), Offset(w * 0.1f, h * 0.7f),
+                        Offset(w * 0.75f, h * 0.85f), Offset(w * 0.25f, h * 0.88f)
+                    )
+                    sparkles.forEachIndexed { i, pos ->
+                        val delay = i * 0.12f
+                        val localProg = ((pProg - delay) / (1f - delay)).coerceIn(0f, 1f)
+                        if (localProg > 0f) {
+                            val sparkAlpha = if (localProg < 0.5f) localProg * 2f else (1f - localProg) * 2f
+                            val sparkSize = 2f + localProg * 3f
+                            drawCircle(
+                                color = Color(0xFF7B7FD4).copy(alpha = sparkAlpha * 0.8f),
+                                radius = sparkSize,
+                                center = pos
+                            )
+                        }
+                    }
+                }
+
+                // Shimmer line across trackpad
+                if (prog > 0.9f) {
+                    val shimmerX = w * shimmer
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            listOf(Color.Transparent, Color.White.copy(alpha = 0.15f), Color.Transparent),
+                            startX = shimmerX - w * 0.15f,
+                            endX = shimmerX + w * 0.15f
+                        ),
+                        start = Offset(shimmerX, h * 0.12f),
+                        end = Offset(shimmerX, h * 0.76f),
+                        strokeWidth = w * 0.06f
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // App name with slide-up
+            Text(
+                text = "PhonePad",
+                color = Color.White.copy(alpha = textAlpha.value),
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+                modifier = Modifier.offset(y = textSlide.value.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "bluetooth trackpad",
+                color = Color(0xFF2DD4BF).copy(alpha = textAlpha.value * 0.7f),
+                fontSize = 13.sp,
+                letterSpacing = 3.sp,
+                modifier = Modifier.offset(y = textSlide.value.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun CompatFailScreen(deviceModel: String, modifier: Modifier = Modifier) {
+    var showWhy by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.BluetoothDisabled,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "This phone can't run PhonePad",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = deviceModel,
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        TextButton(onClick = { showWhy = !showWhy }) {
+            Text(text = if (showWhy) "Hide details" else "Why?")
+            Icon(
+                imageVector = if (showWhy) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        AnimatedVisibility(visible = showWhy) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant,
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "PhonePad requires:",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = "- Bluetooth hardware on your phone", fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = "- Bluetooth HID Device profile support", fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = "- Android 9 (Pie) or newer", fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun OnboardingScreen(
+    onComplete: () -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val pagerState = rememberPagerState(pageCount = { 4 })
+    val scope = rememberCoroutineScope()
+
+    Column(modifier = modifier.fillMaxSize()) {
+        // Skip button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onSkip) {
+                Text("Skip", fontSize = 14.sp)
+            }
+        }
+
+        // Pager
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f)
+        ) { page ->
+            when (page) {
+                0 -> OnboardingPage(
+                    icon = Icons.Filled.TouchApp,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    heading = "Your phone is now a trackpad",
+                    body = "Turn your phone into a wireless trackpad for your Windows PC.",
+                    illustration = { OnboardingIllustrationPhoneTrackpad() }
+                )
+                1 -> OnboardingPage(
+                    icon = null,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    heading = "What you need",
+                    body = "Just a Bluetooth-enabled PC. That's it.",
+                    illustration = { OnboardingIllustrationChecklist() }
+                )
+                2 -> OnboardingPage(
+                    icon = null,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    heading = "How it works",
+                    body = "Your phone connects directly over Bluetooth.",
+                    illustration = { OnboardingIllustrationFlow() }
+                )
+                3 -> OnboardingPage(
+                    icon = Icons.Filled.Bluetooth,
+                    iconTint = MaterialTheme.colorScheme.secondary,
+                    heading = "Ready to pair?",
+                    body = "Let's get your phone connected to your computer.",
+                    illustration = null,
+                    action = {
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Button(
+                            onClick = onComplete,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 32.dp)
+                                .height(52.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Set Up", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                )
+            }
+        }
+
+        // Dot indicators
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            repeat(4) { index ->
+                val selected = pagerState.currentPage == index
+                val dotColor by animateColorAsState(
+                    targetValue = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outlineVariant,
+                    label = "dot$index"
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .size(if (selected) 10.dp else 8.dp)
+                        .clip(CircleShape)
+                        .background(dotColor)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnboardingPage(
+    icon: androidx.compose.ui.graphics.vector.ImageVector?,
+    iconTint: Color,
+    heading: String,
+    body: String,
+    illustration: (@Composable () -> Unit)?,
+    action: (@Composable () -> Unit)? = null
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        if (illustration != null) {
+            illustration()
+            Spacer(modifier = Modifier.height(32.dp))
+        } else if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(72.dp)
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+        Text(
+            text = heading,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = body,
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        if (action != null) {
+            action()
+        }
+    }
+}
+
+@Composable
+private fun OnboardingIllustrationPhoneTrackpad() {
+    val primary = MaterialTheme.colorScheme.primary
+    val accent = MaterialTheme.colorScheme.secondary
+
+    val phoneSlide = remember { Animatable(40f) }
+    val phoneAlpha = remember { Animatable(0f) }
+    val cursorAnim = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        launch { phoneAlpha.animateTo(1f, tween(600)) }
+        launch { phoneSlide.animateTo(0f, tween(700, easing = EaseOutCubic)) }
+        delay(400)
+        cursorAnim.animateTo(1f, tween(800, easing = EaseOutBack))
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "cursorFloat")
+    val cursorY by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 8f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "cursorY"
+    )
+
+    Canvas(
+        modifier = Modifier
+            .size(160.dp)
+            .alpha(phoneAlpha.value)
+            .offset(y = phoneSlide.value.dp)
+    ) {
+        val w = size.width
+        val h = size.height
+        // Glow behind phone
+        drawRoundRect(
+            brush = Brush.radialGradient(
+                listOf(primary.copy(alpha = 0.12f), Color.Transparent),
+                center = Offset(w * 0.5f, h * 0.45f),
+                radius = w * 0.35f
+            ),
+            topLeft = Offset(w * 0.25f, h * 0.05f),
+            size = Size(w * 0.5f, h * 0.8f),
+            cornerRadius = CornerRadius(w * 0.06f)
+        )
+        // Phone body
+        drawRoundRect(
+            color = primary,
+            topLeft = Offset(w * 0.3f, h * 0.1f),
+            size = Size(w * 0.4f, h * 0.7f),
+            cornerRadius = CornerRadius(w * 0.04f),
+            style = Stroke(width = 3f)
+        )
+        // Screen area
+        drawRoundRect(
+            color = primary.copy(alpha = 0.08f),
+            topLeft = Offset(w * 0.34f, h * 0.18f),
+            size = Size(w * 0.32f, h * 0.5f),
+            cornerRadius = CornerRadius(w * 0.02f)
+        )
+        // Cursor arrow — animated in with float
+        if (cursorAnim.value > 0f) {
+            val cScale = cursorAnim.value
+            val yOff = cursorY * cScale
+            val arrowPath = Path().apply {
+                moveTo(w * 0.45f, h * 0.3f + yOff)
+                lineTo(w * 0.45f, h * 0.55f + yOff)
+                lineTo(w * 0.50f, h * 0.48f + yOff)
+                lineTo(w * 0.57f, h * 0.58f + yOff)
+                lineTo(w * 0.60f, h * 0.55f + yOff)
+                lineTo(w * 0.53f, h * 0.45f + yOff)
+                lineTo(w * 0.59f, h * 0.42f + yOff)
+                close()
+            }
+            drawPath(arrowPath, color = accent.copy(alpha = cScale))
+        }
+    }
+}
+
+@Composable
+private fun OnboardingIllustrationChecklist() {
+    val accent = MaterialTheme.colorScheme.secondary
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val items = listOf("Bluetooth-enabled PC", "No companion app needed", "No Wi-Fi required")
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        items.forEachIndexed { index, text ->
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                delay(index * 300L + 200L)
+                visible = true
+            }
+            val itemAlpha by animateFloatAsState(
+                targetValue = if (visible) 1f else 0f, tween(400), label = "checkAlpha$index"
+            )
+            val itemSlide by animateFloatAsState(
+                targetValue = if (visible) 0f else 20f, tween(400, easing = EaseOutCubic), label = "checkSlide$index"
+            )
+            Box(modifier = Modifier.alpha(itemAlpha).offset(x = itemSlide.dp)) {
+                OnboardingCheckItem(text = text, checked = true, accent = accent, textColor = textColor)
+            }
+            if (index < items.lastIndex) Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun OnboardingCheckItem(text: String, checked: Boolean, accent: Color, textColor: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(if (checked) accent.copy(alpha = 0.15f) else Color.Transparent),
+            contentAlignment = Alignment.Center
+        ) {
+            if (checked) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(text = text, fontSize = 16.sp, color = textColor)
+    }
+}
+
+@Composable
+private fun OnboardingIllustrationFlow() {
+    val primary = MaterialTheme.colorScheme.primary
+    val accent = MaterialTheme.colorScheme.secondary
+
+    var phoneVisible by remember { mutableStateOf(false) }
+    var btVisible by remember { mutableStateOf(false) }
+    var pcVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        phoneVisible = true; delay(300)
+        btVisible = true; delay(300)
+        pcVisible = true
+    }
+
+    val phoneAlpha by animateFloatAsState(if (phoneVisible) 1f else 0f, tween(500), label = "pA")
+    val phoneX by animateFloatAsState(if (phoneVisible) 0f else -30f, tween(500, easing = EaseOutCubic), label = "pX")
+    val btAlpha by animateFloatAsState(if (btVisible) 1f else 0f, tween(400), label = "bA")
+    val btScale by animateFloatAsState(if (btVisible) 1f else 0.5f, tween(400, easing = EaseOutBack), label = "bS")
+    val pcAlpha by animateFloatAsState(if (pcVisible) 1f else 0f, tween(500), label = "pcA")
+    val pcX by animateFloatAsState(if (pcVisible) 0f else 30f, tween(500, easing = EaseOutCubic), label = "pcX")
+
+    // Pulsing signal dots between phone and PC
+    val infiniteTransition = rememberInfiniteTransition(label = "signal")
+    val signalPhase by infiniteTransition.animateFloat(
+        0f, 1f, infiniteRepeatable(tween(1200, easing = LinearEasing)), label = "sigPhase"
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Phone
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.alpha(phoneAlpha).offset(x = phoneX.dp)
+        ) {
+            Icon(Icons.Filled.PhoneAndroid, null, tint = primary, modifier = Modifier.size(48.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Phone", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        // Signal dots
+        Spacer(modifier = Modifier.width(8.dp))
+        Canvas(modifier = Modifier.size(width = 40.dp, height = 32.dp).alpha(btAlpha)) {
+            val dots = 3
+            for (i in 0 until dots) {
+                val phase = ((signalPhase + i * 0.33f) % 1f)
+                val x = size.width * phase
+                val alpha = if (phase < 0.5f) phase * 2f else (1f - phase) * 2f
+                drawCircle(accent.copy(alpha = alpha * 0.7f), radius = 3f, center = Offset(x, size.height / 2f))
+            }
+        }
+        // BT icon
+        Icon(
+            Icons.Filled.Bluetooth, null, tint = accent,
+            modifier = Modifier.size(32.dp).alpha(btAlpha).scale(btScale)
+        )
+        // Signal dots
+        Canvas(modifier = Modifier.size(width = 40.dp, height = 32.dp).alpha(btAlpha)) {
+            val dots = 3
+            for (i in 0 until dots) {
+                val phase = ((signalPhase + i * 0.33f) % 1f)
+                val x = size.width * phase
+                val alpha = if (phase < 0.5f) phase * 2f else (1f - phase) * 2f
+                drawCircle(accent.copy(alpha = alpha * 0.7f), radius = 3f, center = Offset(x, size.height / 2f))
+            }
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        // PC
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.alpha(pcAlpha).offset(x = pcX.dp)
+        ) {
+            Icon(Icons.Filled.Computer, null, tint = primary, modifier = Modifier.size(48.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("PC", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+fun PermissionScreen(
+    onContinue: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Bluetooth,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(80.dp)
+        )
+        Spacer(modifier = Modifier.height(32.dp))
+        Text(
+            text = "Bluetooth Access",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "PhonePad needs Bluetooth access to connect to your computer as a trackpad.\n\nWe don't collect any data.",
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(40.dp))
+        Button(
+            onClick = onContinue,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp)
+                .height(52.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("Continue", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+fun PermissionDeniedScreen(
+    onOpenSettings: () -> Unit,
+    onTryAgain: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Warning,
+            contentDescription = null,
+            tint = Color(0xFFD97706),
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "Bluetooth Access Required",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Bluetooth access is required for PhonePad to work. Please grant permission in Settings or try again.",
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(32.dp))
+        Button(
+            onClick = onOpenSettings,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp)
+                .height(52.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("Open Settings", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        TextButton(onClick = onTryAgain) {
+            Text("Try Again", fontSize = 16.sp)
+        }
+    }
+}
+
+@Composable
+fun PairingGuideScreen(
+    connectionStatus: String,
+    isConnected: Boolean,
+    connectedHostName: String?,
+    onNavigateToTrackpad: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Connected celebration state
+    var showCelebration by remember { mutableStateOf(false) }
+    val celebrationScale = remember { Animatable(0f) }
+    val celebrationAlpha = remember { Animatable(0f) }
+
+    // Auto-navigate to trackpad after connection with celebration
+    LaunchedEffect(isConnected) {
+        if (isConnected) {
+            showCelebration = true
+            launch { celebrationAlpha.animateTo(1f, tween(300)) }
+            launch { celebrationScale.animateTo(1f, tween(500, easing = EaseOutBack)) }
+            delay(1800L)
+            launch { celebrationAlpha.animateTo(0f, tween(400)) }
+            delay(400)
+            onNavigateToTrackpad()
+        }
+    }
+
+    val scrollState = rememberScrollState()
+    var showTroubleshooting by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+    ) {
+        Text(
+            text = "Pairing Guide",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Follow these steps to connect your phone to your PC.",
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Step 1
+        PairingStep(
+            number = 1,
+            title = "Open Bluetooth settings on your computer",
+            description = "Go to Windows Settings → Bluetooth & devices",
+            isActive = true,
+            isComplete = false
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Step 2
+        PairingStep(
+            number = 2,
+            title = "Tap 'Add Device' and choose 'Bluetooth'",
+            description = "Your computer will start scanning for nearby devices.",
+            isActive = true,
+            isComplete = false
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Step 3 - live status
+        PairingStep(
+            number = 3,
+            title = "Select your phone from the device list",
+            description = "It will appear by your phone's Bluetooth name.",
+            isActive = true,
+            isComplete = isConnected,
+            statusContent = {
+                Spacer(modifier = Modifier.height(8.dp))
+                PairingStatusIndicator(
+                    isConnected = isConnected,
+                    connectedHostName = connectedHostName
+                )
+            }
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Step 4
+        PairingStep(
+            number = 4,
+            title = if (isConnected) "You're all set!" else "Waiting for connection...",
+            description = if (isConnected) "Navigating to trackpad..." else null,
+            isActive = isConnected,
+            isComplete = isConnected
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Troubleshooting
+        TextButton(onClick = { showTroubleshooting = !showTroubleshooting }) {
+            Text(
+                text = "Troubleshooting",
+                fontSize = 14.sp
+            )
+            Icon(
+                imageVector = if (showTroubleshooting) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        AnimatedVisibility(visible = showTroubleshooting) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant,
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "If your phone doesn't appear:",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = "- Make sure Bluetooth is enabled on both devices", fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = "- Restart Bluetooth on your computer", fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = "- Move your phone closer to the computer", fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = "- Try removing your phone from paired devices and re-pairing", fontSize = 14.sp)
+            }
+        }
+    }
+
+    // Success celebration overlay
+    if (showCelebration) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = celebrationAlpha.value * 0.85f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .alpha(celebrationAlpha.value)
+                    .scale(celebrationScale.value)
+            ) {
+                // Success checkmark with ring
+                Canvas(modifier = Modifier.size(96.dp)) {
+                    val w = size.width
+                    val strokeW = 4f
+                    // Outer ring
+                    drawCircle(
+                        color = Color(0xFF0D9488),
+                        radius = w / 2f - strokeW,
+                        style = Stroke(width = strokeW)
+                    )
+                    // Inner glow
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            listOf(Color(0xFF0D9488).copy(alpha = 0.15f), Color.Transparent)
+                        ),
+                        radius = w / 2f
+                    )
+                    // Checkmark
+                    val check = Path().apply {
+                        moveTo(w * 0.28f, w * 0.5f)
+                        lineTo(w * 0.44f, w * 0.65f)
+                        lineTo(w * 0.72f, w * 0.35f)
+                    }
+                    drawPath(check, Color(0xFF0D9488), style = Stroke(width = 5f, cap = StrokeCap.Round))
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = "Connected!",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0D9488)
+                )
+                if (connectedHostName != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = connectedHostName,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+    } // close Box
+}
+
+@Composable
+private fun PairingStep(
+    number: Int,
+    title: String,
+    description: String?,
+    isActive: Boolean,
+    isComplete: Boolean,
+    statusContent: (@Composable () -> Unit)? = null
+) {
+    val circleColor by animateColorAsState(
+        targetValue = when {
+            isComplete -> MaterialTheme.colorScheme.secondary
+            isActive -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.outlineVariant
+        },
+        label = "stepCircle$number"
+    )
+
+    Row(modifier = Modifier.fillMaxWidth()) {
+        // Numbered circle
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(circleColor),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isComplete) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            } else {
+                Text(
+                    text = number.toString(),
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (description != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = description,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (statusContent != null) {
+                statusContent()
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairingStatusIndicator(
+    isConnected: Boolean,
+    connectedHostName: String?
+) {
+    val statusColor by animateColorAsState(
+        targetValue = if (isConnected) MaterialTheme.colorScheme.secondary else Color(0xFFD97706),
+        label = "statusColor"
+    )
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (isConnected) {
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = statusColor,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Connected" + if (connectedHostName != null) " to $connectedHostName" else "",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = statusColor
+            )
+        } else {
+            // Pulsing dot
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+            val pulseAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(800),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "pulseAlpha"
+            )
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .alpha(pulseAlpha)
+                    .background(statusColor)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Waiting for connection...",
+                fontSize = 14.sp,
+                color = statusColor
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @SuppressLint("MissingPermission")
 @Composable
-fun PhonePadScreen(
-    bluetoothStatus: String,
-    permissionStatus: String,
-    hidProfileStatus: String,
-    registrationStatus: String,
+fun TrackpadScreen(
     connectionStatus: String,
     bondedDevices: List<BluetoothDevice>,
     isConnected: Boolean,
@@ -1701,175 +3197,1544 @@ fun PhonePadScreen(
     onTapToClickChange: (Boolean) -> Unit,
     naturalScroll: Boolean,
     onNaturalScrollChange: (Boolean) -> Unit,
+    rippleEnabled: Boolean,
+    onRippleChange: (Boolean) -> Unit,
+    hapticsEnabled: Boolean,
+    onHapticsChange: (Boolean) -> Unit,
+    statusBarAutoHide: Boolean,
+    onStatusBarAutoHideChange: (Boolean) -> Unit,
+    trackpadTheme: String,
+    onTrackpadThemeChange: (String) -> Unit,
+    batteryPercent: Int,
+    showGestureGuide: Boolean,
+    onToggleGestureGuide: () -> Unit,
+    onDismissGestureGuide: () -> Unit,
+    gestureGuideSections: Map<String, Boolean>,
+    onToggleGestureSection: (String) -> Unit,
+    showDeviceManager: Boolean,
+    onToggleDeviceManager: () -> Unit,
+    onDismissDeviceManager: () -> Unit,
+    deviceNicknames: Map<String, String>,
+    onRenameDevice: (String, String) -> Unit,
+    onForgetDevice: (BluetoothDevice) -> Unit,
+    onNavigateToPairingGuide: () -> Unit,
+    isBluetoothOff: Boolean,
+    onTurnOnBluetooth: () -> Unit,
+    showDisconnectSheet: Boolean,
+    disconnectAutoReconnectFailed: Boolean,
+    onDismissDisconnectSheet: () -> Unit,
+    onRetryConnect: () -> Unit,
+    appVersion: String,
+    hasBluetoothPermissions: Boolean,
+    onRequestPermissions: () -> Unit,
+    onOpenAppSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
+    val darkSurface = when (trackpadTheme) {
+        "darker" -> Color(0xFF050508)
+        "amoled" -> Color.Black
+        else -> Color(0xFF111118)
+    }
+    val accentGlow = when (trackpadTheme) {
+        "darker" -> Color(0xFF3B3F9E)
+        "amoled" -> Color.Transparent
+        else -> Color(0xFF4B4FCF)
+    }
+    val edgeGlow = when (trackpadTheme) {
+        "darker" -> Color(0xFF2B2D6E).copy(alpha = 0.06f)
+        "amoled" -> Color.Transparent
+        else -> Color(0xFF2B2D6E).copy(alpha = 0.12f)
+    }
+
+    // Status bar fade: visible initially, fades after 3s of no interaction
+    var statusBarVisible by remember { mutableStateOf(true) }
+    var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
+    val statusBarAlpha by animateFloatAsState(
+        targetValue = if (statusBarVisible) 1f else 0f,
+        animationSpec = tween(600),
+        label = "statusBarAlpha"
+    )
+
+    // Connected entrance animation
+    var justConnected by remember { mutableStateOf(false) }
+    val connectGlow = remember { Animatable(0f) }
+    LaunchedEffect(isConnected) {
+        if (isConnected) {
+            justConnected = true
+            connectGlow.snapTo(0f)
+            connectGlow.animateTo(1f, tween(600, easing = EaseOutCubic))
+            delay(800)
+            connectGlow.animateTo(0f, tween(1000))
+            justConnected = false
+        }
+    }
+
+    // Fade out after 3s
+    LaunchedEffect(lastInteractionTime, connectionStatus, statusBarAutoHide) {
+        if (connectionStatus != "CONNECTED" && connectionStatus != "DISCONNECTED") {
+            statusBarVisible = true
+            return@LaunchedEffect
+        }
+        statusBarVisible = true
+        if (statusBarAutoHide) {
+            delay(3000L)
+            if (isConnected) statusBarVisible = false
+        }
+    }
+
+    // Breathing glow animation for trackpad surface
+    val infiniteTransition = rememberInfiniteTransition(label = "trackpadAmbient")
+    val breathe by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(4000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "breathe"
+    )
+
+    // Show reconnect sheet
+    var showReconnectSheet by remember { mutableStateOf(false) }
+
+    // Immersive mode
+    val view = LocalView.current
+    DisposableEffect(Unit) {
+        val window = (view.context as? ComponentActivity)?.window
+        window?.let { w ->
+            w.insetsController?.let { controller ->
+                controller.hide(android.view.WindowInsets.Type.systemBars())
+                controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
+        onDispose {
+            window?.let { w ->
+                w.insetsController?.show(android.view.WindowInsets.Type.systemBars())
+            }
+        }
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(darkSurface)
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "PhonePad",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-
-        DiagnosticRow("Bluetooth:", bluetoothStatus)
-        DiagnosticRow("Permission:", permissionStatus)
-        DiagnosticRow("HID Device Profile:", hidProfileStatus)
-        DiagnosticRow("HID App Registration:", registrationStatus)
-        DiagnosticRow("Connection:", if (isConnected && connectedHostName != null) "CONNECTED to $connectedHostName" else connectionStatus)
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (bondedDevices.isNotEmpty() && !isConnected) {
-            Text(
-                text = "Bonded Devices",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            bondedDevices.forEach { device ->
-                OutlinedButton(
-                    onClick = { onDeviceSelected(device) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp)
-                ) {
-                    Text(text = "${device.name ?: "Unknown"} [${device.address}]", fontSize = 13.sp)
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        if (isConnected) {
-            Text(
-                text = if (showSettings) "Hide Settings" else "Settings",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable { onToggleSettings() }
-                    .padding(vertical = 4.dp)
-            )
-
-            if (showSettings) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(12.dp)
-                ) {
-                    Text("Sensitivity", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Slow", fontSize = 11.sp)
-                        Slider(
-                            value = sensitivity,
-                            onValueChange = onSensitivityChange,
-                            valueRange = 0.3f..2.0f,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text("Fast", fontSize = 11.sp)
-                    }
-                    Text(
-                        text = "%.1fx".format(sensitivity),
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
+        // Ambient gradient — theme-aware
+        if (trackpadTheme != "amoled") {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val cx = size.width / 2f
+                val cy = size.height * 0.4f
+                val glowRadius = size.minDimension * (0.55f + breathe * 0.1f)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(accentGlow.copy(alpha = 0.025f + breathe * 0.01f), Color.Transparent),
+                        center = Offset(cx, cy), radius = glowRadius
+                    ),
+                    radius = glowRadius, center = Offset(cx, cy)
+                )
+                // Subtle edge vignette
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        listOf(edgeGlow, Color.Transparent, Color.Transparent, edgeGlow)
                     )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Tap to Click", fontSize = 13.sp)
-                        Switch(checked = tapToClick, onCheckedChange = onTapToClickChange)
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Natural Scroll", fontSize = 13.sp)
-                        Switch(checked = naturalScroll, onCheckedChange = onNaturalScrollChange)
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
+                )
             }
         }
 
+        // Connected celebration glow
+        if (connectGlow.value > 0f) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(Color(0xFF0D9488).copy(alpha = connectGlow.value * 0.2f), Color.Transparent),
+                        center = Offset(size.width / 2f, size.height / 2f),
+                        radius = size.minDimension * (0.3f + connectGlow.value * 0.5f)
+                    ),
+                    radius = size.minDimension * (0.3f + connectGlow.value * 0.5f),
+                    center = Offset(size.width / 2f, size.height / 2f)
+                )
+            }
+        }
+
+        // Touch surface (edge-to-edge)
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .border(
-                    width = 2.dp,
-                    color = if (isConnected)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.outlineVariant,
-                    shape = RoundedCornerShape(12.dp)
-                )
-                .background(
-                    color = if (isConnected)
-                        MaterialTheme.colorScheme.surfaceVariant
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(12.dp)
-                )
+                .fillMaxSize()
                 .then(
                     if (isConnected) {
-                        Modifier.pointerInteropFilter { event -> onTouchEvent(event) }
+                        Modifier.pointerInteropFilter { event ->
+                            lastInteractionTime = System.currentTimeMillis()
+                            onTouchEvent(event)
+                        }
                     } else {
                         Modifier
                     }
-                ),
-            contentAlignment = Alignment.Center
+                )
         ) {
-            Text(
-                text = if (isConnected) "1 finger: cursor / tap / hold-drag\n2 fingers: scroll or pinch-zoom  ·  tap: right-click\n3 fingers: swipe or tap (middle-click)\n4 fingers L/R: virtual desktop  ·  tap: Notification Center"
-                       else "Not connected",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
+            if (!isConnected) {
+                // Animated not-connected state
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (connectionStatus == "CONNECTING") {
+                        // Pulsing Bluetooth waves animation
+                        val waveTransition = rememberInfiniteTransition(label = "btWaves")
+                        val wave1 by waveTransition.animateFloat(
+                            0f, 1f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "w1"
+                        )
+                        val wave2 by waveTransition.animateFloat(
+                            0f, 1f, infiniteRepeatable(tween(1500, 500, easing = LinearEasing)), label = "w2"
+                        )
+                        val wave3 by waveTransition.animateFloat(
+                            0f, 1f, infiniteRepeatable(tween(1500, 1000, easing = LinearEasing)), label = "w3"
+                        )
+                        Canvas(modifier = Modifier.size(100.dp)) {
+                            val cx = size.width / 2f
+                            val cy = size.height / 2f
+                            listOf(wave1, wave2, wave3).forEach { w ->
+                                val radius = 12f + w * (size.minDimension / 2f - 12f)
+                                val alpha = (1f - w) * 0.4f
+                                drawCircle(
+                                    color = Color(0xFF7B7FD4).copy(alpha = alpha),
+                                    radius = radius,
+                                    center = Offset(cx, cy),
+                                    style = Stroke(width = 2.5f)
+                                )
+                            }
+                            // BT icon center
+                            drawCircle(Color(0xFF7B7FD4), radius = 14f, center = Offset(cx, cy))
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Connecting...",
+                            color = Color(0xFF7B7FD4).copy(alpha = 0.8f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else {
+                        // Subtle trackpad outline hint
+                        Canvas(modifier = Modifier.size(80.dp)) {
+                            drawRoundRect(
+                                color = Color.White.copy(alpha = 0.08f + breathe * 0.04f),
+                                cornerRadius = CornerRadius(12f),
+                                style = Stroke(width = 1.5f)
+                            )
+                            val arrowPath = Path().apply {
+                                val cx = size.width * 0.45f
+                                val cy = size.height * 0.3f
+                                moveTo(cx, cy)
+                                lineTo(cx, cy + size.height * 0.28f)
+                                lineTo(cx + size.width * 0.08f, cy + size.height * 0.2f)
+                                lineTo(cx + size.width * 0.15f, cy + size.height * 0.32f)
+                                lineTo(cx + size.width * 0.2f, cy + size.height * 0.28f)
+                                lineTo(cx + size.width * 0.13f, cy + size.height * 0.18f)
+                                lineTo(cx + size.width * 0.2f, cy + size.height * 0.15f)
+                                close()
+                            }
+                            drawPath(arrowPath, color = Color.White.copy(alpha = 0.1f + breathe * 0.05f))
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Not connected",
+                            color = Color.White.copy(alpha = 0.35f),
+                            fontSize = 15.sp
+                        )
+                    }
+                    if (bondedDevices.isNotEmpty() && connectionStatus != "CONNECTING") {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        bondedDevices.forEach { device ->
+                            OutlinedButton(
+                                onClick = { onDeviceSelected(device) },
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFF7B7FD4)
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    text = device.name ?: device.address,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Status bar (top) — glass effect with blur
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(statusBarAlpha)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 0.5f), Color.Black.copy(alpha = 0.15f), Color.Transparent)
+                    )
+                )
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Connection status pill (left)
+            ConnectionStatusPill(
+                connectionStatus = connectionStatus,
+                isConnected = isConnected,
+                connectedHostName = connectedHostName,
+                onClick = {
+                    if (!isConnected) showReconnectSheet = true
+                },
+                onLongClick = {
+                    onToggleDeviceManager()
+                }
+            )
+
+            // Battery % (right)
+            if (batteryPercent >= 0) {
+                Text(
+                    text = "$batteryPercent%",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = 11.sp,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // Gear icon (top-right, always present, subtle)
+        IconButton(
+            onClick = {
+                lastInteractionTime = System.currentTimeMillis()
+                onToggleSettings()
+            },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 42.dp, end = 8.dp)
+                .alpha(0.25f)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = "Settings",
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // Gesture guide swipe-up affordance (bottom center)
+        if (!showGestureGuide) {
+            val affordanceAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.15f, targetValue = 0.35f,
+                animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                label = "affordance"
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 10.dp)
+                    .alpha(affordanceAlpha)
+                    .clickable { onToggleGestureGuide() },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowUp,
+                    contentDescription = "Gesture Guide",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Gestures",
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
+
+        // Edge zone detector: swipe up from bottom 20dp opens gesture guide
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(20.dp)
+                .align(Alignment.BottomCenter)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { _, dragAmount ->
+                        if (dragAmount < -10f && !showGestureGuide) {
+                            onToggleGestureGuide()
+                        }
+                    }
+                }
+        )
+
+        // Settings overlay (full-screen)
+        AnimatedVisibility(
+            visible = showSettings,
+            enter = fadeIn(tween(300)),
+            exit = fadeOut(tween(300))
+        ) {
+            SettingsOverlay(
+                onDismiss = onToggleSettings,
+                sensitivity = sensitivity,
+                onSensitivityChange = onSensitivityChange,
+                tapToClick = tapToClick,
+                onTapToClickChange = onTapToClickChange,
+                naturalScroll = naturalScroll,
+                onNaturalScrollChange = onNaturalScrollChange,
+                rippleEnabled = rippleEnabled,
+                onRippleChange = onRippleChange,
+                hapticsEnabled = hapticsEnabled,
+                onHapticsChange = onHapticsChange,
+                statusBarAutoHide = statusBarAutoHide,
+                onStatusBarAutoHideChange = onStatusBarAutoHideChange,
+                trackpadTheme = trackpadTheme,
+                onTrackpadThemeChange = onTrackpadThemeChange,
+                bondedDevices = bondedDevices,
+                isConnected = isConnected,
+                connectedDeviceAddress = bondedDevices.firstOrNull { (deviceNicknames[it.address] ?: it.name) == connectedHostName }?.address,
+                deviceNicknames = deviceNicknames,
+                onOpenDeviceManager = {
+                    onToggleSettings()
+                    onToggleDeviceManager()
+                },
+                onNavigateToPairingGuide = onNavigateToPairingGuide,
+                appVersion = appVersion
+            )
+        }
+
+        // Device Manager overlay
+        AnimatedVisibility(
+            visible = showDeviceManager,
+            enter = fadeIn(tween(300)),
+            exit = fadeOut(tween(300))
+        ) {
+            DeviceManagerOverlay(
+                bondedDevices = bondedDevices,
+                connectedDeviceAddress = bondedDevices.firstOrNull { isConnected && (deviceNicknames[it.address] ?: it.name) == connectedHostName }?.address,
+                deviceNicknames = deviceNicknames,
+                onRenameDevice = onRenameDevice,
+                onForgetDevice = onForgetDevice,
+                onDeviceSelected = onDeviceSelected,
+                onNavigateToPairingGuide = onNavigateToPairingGuide,
+                onDismiss = onDismissDeviceManager
+            )
+        }
+
+        // Reconnect sheet (manual, from tapping disconnected pill)
+        AnimatedVisibility(
+            visible = showReconnectSheet && !isConnected,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut()
+        ) {
+            ReconnectSheet(
+                connectedHostName = connectedHostName,
+                bondedDevices = bondedDevices,
+                onDeviceSelected = { device ->
+                    onDeviceSelected(device)
+                    showReconnectSheet = false
+                },
+                onDismiss = { showReconnectSheet = false }
+            )
+        }
+
+        // Auto-reconnect failed sheet (Phase 5)
+        AnimatedVisibility(
+            visible = showDisconnectSheet && disconnectAutoReconnectFailed,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut()
+        ) {
+            DisconnectErrorSheet(
+                lastDeviceName = connectedHostName,
+                onRetry = onRetryConnect,
+                onPairDifferent = onNavigateToPairingGuide,
+                onDismiss = onDismissDisconnectSheet
+            )
+        }
+
+        // Bluetooth off overlay (Phase 5)
+        AnimatedVisibility(
+            visible = isBluetoothOff,
+            enter = fadeIn(tween(300)),
+            exit = fadeOut(tween(300))
+        ) {
+            BluetoothOffOverlay(onTurnOn = onTurnOnBluetooth)
+        }
+
+        // Permission revoked overlay (Phase 5)
+        if (!hasBluetoothPermissions && !isBluetoothOff) {
+            PermissionRevokedOverlay(
+                onGrantPermission = onOpenAppSettings
+            )
+        }
+
+        // Gesture Guide bottom sheet
+        AnimatedVisibility(
+            visible = showGestureGuide,
+            enter = slideInVertically { it } + fadeIn(tween(200)),
+            exit = slideOutVertically { it } + fadeOut(tween(200))
+        ) {
+            GestureGuideSheet(
+                sections = gestureGuideSections,
+                onToggleSection = onToggleGestureSection,
+                onDismiss = onDismissGestureGuide
+            )
+        }
     }
 }
 
 @Composable
-fun DiagnosticRow(label: String, value: String) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(vertical = 2.dp)
+private fun ConnectionStatusPill(
+    connectionStatus: String,
+    isConnected: Boolean,
+    connectedHostName: String?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val dotColor = when {
+        isConnected -> Color(0xFF0D9488)
+        connectionStatus == "CONNECTING" -> Color(0xFFD97706)
+        else -> Color(0xFFDC2626)
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "statusPulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .alpha(if (!isConnected) pulseAlpha else 1f)
+                .background(dotColor)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = label,
+            text = when {
+                isConnected -> connectedHostName ?: "Connected"
+                connectionStatus == "CONNECTING" -> "Reconnecting..."
+                else -> "Disconnected"
+            },
+            color = Color.White.copy(alpha = 0.8f),
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontWeight = FontWeight.Medium
         )
+        if (connectionStatus == "CONNECTING") {
+            Spacer(modifier = Modifier.width(6.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.size(12.dp),
+                strokeWidth = 1.5.dp,
+                color = Color(0xFFD97706)
+            )
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 4 — Settings Screen (4 groups)
+// ──────────────────────────────────────────────────────────────────────────────
+
+@SuppressLint("MissingPermission")
+@Composable
+private fun SettingsOverlay(
+    onDismiss: () -> Unit,
+    sensitivity: Float,
+    onSensitivityChange: (Float) -> Unit,
+    tapToClick: Boolean,
+    onTapToClickChange: (Boolean) -> Unit,
+    naturalScroll: Boolean,
+    onNaturalScrollChange: (Boolean) -> Unit,
+    rippleEnabled: Boolean,
+    onRippleChange: (Boolean) -> Unit,
+    hapticsEnabled: Boolean,
+    onHapticsChange: (Boolean) -> Unit,
+    statusBarAutoHide: Boolean,
+    onStatusBarAutoHideChange: (Boolean) -> Unit,
+    trackpadTheme: String,
+    onTrackpadThemeChange: (String) -> Unit,
+    bondedDevices: List<BluetoothDevice>,
+    isConnected: Boolean,
+    connectedDeviceAddress: String?,
+    deviceNicknames: Map<String, String>,
+    onOpenDeviceManager: () -> Unit,
+    onNavigateToPairingGuide: () -> Unit,
+    appVersion: String
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xF0121218))
+            .clickable(enabled = false) {}
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+                }
+            }
+
+            // ── Group 1: Trackpad Feel ──
+            Spacer(modifier = Modifier.height(28.dp))
+            SettingsGroupHeader("Trackpad Feel")
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Sensitivity", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("Slow", fontSize = 11.sp, color = Color.White.copy(alpha = 0.4f))
+                Slider(
+                    value = sensitivity,
+                    onValueChange = onSensitivityChange,
+                    valueRange = 0.3f..2.0f,
+                    modifier = Modifier.weight(1f)
+                )
+                Text("Fast", fontSize = 11.sp, color = Color.White.copy(alpha = 0.4f))
+            }
+            val sensitivityLabel = when {
+                sensitivity <= 0.6f -> "Slow and precise"
+                sensitivity <= 1.0f -> "Balanced"
+                sensitivity <= 1.5f -> "Quick"
+                else -> "Fast and loose"
+            }
+            Text(
+                text = "${"%.1f".format(sensitivity)}x · $sensitivityLabel",
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.4f),
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            SettingsToggleRow("Tap to Click", tapToClick, onTapToClickChange)
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsToggleRow("Natural Scroll", naturalScroll, onNaturalScrollChange)
+            Text(
+                text = if (naturalScroll) "Content follows finger direction" else "Traditional scroll direction",
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.35f),
+                modifier = Modifier.padding(start = 0.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsToggleRow("Touch Feedback", hapticsEnabled, onHapticsChange)
+
+            // ── Group 2: Devices ──
+            Spacer(modifier = Modifier.height(28.dp))
+            SettingsGroupHeader("Devices")
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (bondedDevices.isEmpty()) {
+                Text("No paired devices", fontSize = 13.sp, color = Color.White.copy(alpha = 0.4f))
+            } else {
+                bondedDevices.forEach { device ->
+                    val nickname = deviceNicknames[device.address]
+                    val displayName = nickname ?: device.name ?: device.address
+                    val isThisConnected = device.address == connectedDeviceAddress
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenDeviceManager() }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isThisConnected) Color(0xFF0D9488) else Color(0xFF555555))
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(displayName, fontSize = 14.sp, color = Color.White)
+                            if (nickname != null) {
+                                Text(
+                                    device.name ?: device.address,
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.35f)
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (isThisConnected) "Connected" else "",
+                            fontSize = 11.sp,
+                            color = Color(0xFF0D9488)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = onNavigateToPairingGuide) {
+                Text("+ Add new device", color = Color(0xFF7B7FD4), fontSize = 13.sp)
+            }
+            TextButton(onClick = onOpenDeviceManager) {
+                Text("Manage devices", color = Color(0xFF7B7FD4), fontSize = 13.sp)
+            }
+
+            // ── Group 3: Display ──
+            Spacer(modifier = Modifier.height(28.dp))
+            SettingsGroupHeader("Display")
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text("Trackpad Theme", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    Triple("dark", "Dark", Color(0xFF111118)),
+                    Triple("darker", "Darker", Color(0xFF050508)),
+                    Triple("amoled", "AMOLED", Color.Black)
+                ).forEach { (key, label, bg) ->
+                    val selected = trackpadTheme == key
+                    val accentDot = when (key) {
+                        "dark" -> Color(0xFF4B4FCF)
+                        "darker" -> Color(0xFF3B3F9E)
+                        else -> Color.Transparent
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(bg)
+                            .border(
+                                width = if (selected) 2.dp else 1.dp,
+                                color = if (selected) Color(0xFF7B7FD4) else Color.White.copy(alpha = 0.08f),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable { onTrackpadThemeChange(key) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (accentDot != Color.Transparent) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(accentDot.copy(alpha = 0.6f))
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+                            Text(
+                                label, fontSize = 11.sp,
+                                color = Color.White.copy(alpha = if (selected) 1f else 0.45f),
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            SettingsToggleRow("Touch Ripple", rippleEnabled, onRippleChange)
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsToggleRow("Auto-hide Status Bar", statusBarAutoHide, onStatusBarAutoHideChange)
+
+            // ── Group 4: About ──
+            Spacer(modifier = Modifier.height(28.dp))
+            SettingsGroupHeader("About")
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Version", fontSize = 13.sp, color = Color.White.copy(alpha = 0.6f))
+                Text(appVersion, fontSize = 13.sp, color = Color.White.copy(alpha = 0.4f))
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(onClick = {
+                val intent = Intent(Intent.ACTION_SENDTO).apply {
+                    data = Uri.parse("mailto:iammd.uzair@gmail.com")
+                    putExtra(Intent.EXTRA_SUBJECT, "PhonePad Feedback")
+                }
+                try { context.startActivity(intent) } catch (_: Exception) {}
+            }) {
+                Text("Send Feedback", color = Color(0xFF7B7FD4), fontSize = 13.sp)
+            }
+
+            Spacer(modifier = Modifier.height(40.dp))
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroupHeader(title: String) {
+    Column {
         Text(
-            text = value,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold
+            text = title,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF7B7FD4),
+            letterSpacing = 1.sp
         )
+        Spacer(modifier = Modifier.height(4.dp))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 14.sp, color = Color.White)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 4.1 — Device Manager
+// ──────────────────────────────────────────────────────────────────────────────
+
+@SuppressLint("MissingPermission")
+@Composable
+private fun DeviceManagerOverlay(
+    bondedDevices: List<BluetoothDevice>,
+    connectedDeviceAddress: String?,
+    deviceNicknames: Map<String, String>,
+    onRenameDevice: (String, String) -> Unit,
+    onForgetDevice: (BluetoothDevice) -> Unit,
+    onDeviceSelected: (BluetoothDevice) -> Unit,
+    onNavigateToPairingGuide: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var expandedDevice by remember { mutableStateOf<String?>(null) }
+    var editingNickname by remember { mutableStateOf<String?>(null) }
+    var nicknameText by remember { mutableStateOf("") }
+    var confirmForget by remember { mutableStateOf<BluetoothDevice?>(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xF0121218))
+            .clickable(enabled = false) {}
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Device Manager", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+
+            if (bondedDevices.isEmpty()) {
+                Text("No paired devices", fontSize = 14.sp, color = Color.White.copy(alpha = 0.5f))
+            } else {
+                bondedDevices.forEach { device ->
+                    val addr = device.address
+                    val nickname = deviceNicknames[addr]
+                    val displayName = nickname ?: device.name ?: addr
+                    val isThisConnected = addr == connectedDeviceAddress
+                    val isExpanded = expandedDevice == addr
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .background(
+                                if (isExpanded) Color.White.copy(alpha = 0.04f) else Color.Transparent,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable { expandedDevice = if (isExpanded) null else addr }
+                            .padding(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isThisConnected) Color(0xFF0D9488) else Color(0xFF555555))
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(displayName, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                                if (nickname != null) {
+                                    Text(device.name ?: addr, fontSize = 11.sp, color = Color.White.copy(alpha = 0.35f))
+                                }
+                            }
+                            if (isThisConnected) {
+                                Text("Connected", fontSize = 11.sp, color = Color(0xFF0D9488))
+                            }
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.4f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        AnimatedVisibility(visible = isExpanded) {
+                            Column(modifier = Modifier.padding(top = 12.dp, start = 22.dp)) {
+                                Text("Address: $addr", fontSize = 11.sp, color = Color.White.copy(alpha = 0.3f))
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                if (!isThisConnected) {
+                                    TextButton(onClick = { onDeviceSelected(device) }) {
+                                        Text("Connect", color = Color(0xFF7B7FD4), fontSize = 13.sp)
+                                    }
+                                }
+
+                                TextButton(onClick = {
+                                    editingNickname = addr
+                                    nicknameText = nickname ?: device.name ?: ""
+                                }) {
+                                    Text("Rename", color = Color(0xFF7B7FD4), fontSize = 13.sp)
+                                }
+
+                                TextButton(onClick = { confirmForget = device }) {
+                                    Text("Forget Device", color = Color(0xFFDC2626), fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = onNavigateToPairingGuide,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2B2D6E)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("+ Add New Device", fontSize = 14.sp)
+            }
+        }
+
+        // Rename dialog
+        if (editingNickname != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { editingNickname = null },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .background(Color(0xFF1C1C24), RoundedCornerShape(16.dp))
+                        .clickable(enabled = false) {}
+                        .padding(24.dp)
+                ) {
+                    Text("Rename Device", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = nicknameText,
+                        onValueChange = { nicknameText = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Nickname") }
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { editingNickname = null }) {
+                            Text("Cancel", color = Color.White.copy(alpha = 0.5f))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                val addr = editingNickname!!
+                                if (nicknameText.isNotBlank()) {
+                                    onRenameDevice(addr, nicknameText.trim())
+                                }
+                                editingNickname = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2B2D6E))
+                        ) {
+                            Text("Save")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Forget confirmation dialog
+        if (confirmForget != null) {
+            val device = confirmForget!!
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { confirmForget = null },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .background(Color(0xFF1C1C24), RoundedCornerShape(16.dp))
+                        .clickable(enabled = false) {}
+                        .padding(24.dp)
+                ) {
+                    Text("Forget Device?", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "This will unpair ${device.name ?: device.address} and remove all its settings. You'll need to pair again to use it.",
+                        fontSize = 14.sp,
+                        color = Color.White.copy(alpha = 0.7f)
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = { confirmForget = null }) {
+                            Text("Cancel", color = Color.White.copy(alpha = 0.5f))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                onForgetDevice(device)
+                                confirmForget = null
+                                expandedDevice = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                        ) {
+                            Text("Forget")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 5 — Error States & Edge Cases
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun BluetoothOffOverlay(onTurnOn: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xF0121218)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+            Icon(
+                imageVector = Icons.Filled.BluetoothDisabled,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.3f),
+                modifier = Modifier.size(64.dp)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Bluetooth is off",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "PhonePad needs Bluetooth to connect to your computer.",
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+            Button(
+                onClick = onTurnOn,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2B2D6E)),
+                modifier = Modifier.fillMaxWidth(0.7f)
+            ) {
+                Text("Turn on Bluetooth", fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionRevokedOverlay(onGrantPermission: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xF0121218)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = null,
+                tint = Color(0xFFD97706),
+                modifier = Modifier.size(56.dp)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Bluetooth permission was removed",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "PhonePad needs Bluetooth permission to work.",
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+            Button(
+                onClick = onGrantPermission,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2B2D6E)),
+                modifier = Modifier.fillMaxWidth(0.7f)
+            ) {
+                Text("Grant Permission", fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+@SuppressLint("MissingPermission")
+@Composable
+private fun DisconnectErrorSheet(
+    lastDeviceName: String?,
+    onRetry: () -> Unit,
+    onPairDifferent: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable { onDismiss() }
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Color(0xFF1C1C24), RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .clickable(enabled = false) {}
+                .padding(24.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(40.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.3f))
+                    .align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Can't reach ${lastDeviceName ?: "device"}",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Check that Bluetooth is on and the computer is awake.",
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.6f)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = onRetry,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2B2D6E)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Retry", fontSize = 14.sp)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(
+                onClick = onPairDifferent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Pair a different device", color = Color(0xFF7B7FD4), fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@SuppressLint("MissingPermission")
+@Composable
+private fun ReconnectSheet(
+    connectedHostName: String?,
+    bondedDevices: List<BluetoothDevice>,
+    onDeviceSelected: (BluetoothDevice) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable { onDismiss() }
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Color(0xFF1C1C24), RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .clickable(enabled = false) {}
+                .padding(24.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(40.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.3f))
+                    .align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            val searchName = connectedHostName ?: "device"
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = Color(0xFFD97706)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("Looking for $searchName...", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            if (bondedDevices.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Text("Or connect to a different device:", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                bondedDevices.forEach { device ->
+                    TextButton(onClick = { onDeviceSelected(device) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(device.name ?: device.address, color = Color(0xFF7B7FD4), fontSize = 14.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Text("Cancel", color = Color.White.copy(alpha = 0.5f))
+            }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 3 — Gesture Guide Bottom Sheet
+// ──────────────────────────────────────────────────────────────────────────────
+
+private data class GestureEntry(
+    val gesture: String,
+    val action: String,
+    val illustrationType: String
+)
+
+private val gestureData = mapOf(
+    "1-finger" to listOf(
+        GestureEntry("Drag", "Move cursor", "arrow_trail"),
+        GestureEntry("Tap", "Left click", "tap_ripple"),
+        GestureEntry("Tap + hold + drag", "Click and drag", "press_trail"),
+    ),
+    "2-finger" to listOf(
+        GestureEntry("Drag vertical", "Scroll up/down", "two_dots_vertical"),
+        GestureEntry("Drag horizontal", "Scroll left/right", "two_dots_horizontal"),
+        GestureEntry("Tap", "Right click", "two_dots_tap"),
+        GestureEntry("Pinch in/out", "Zoom", "pinch"),
+    ),
+    "3-finger" to listOf(
+        GestureEntry("Tap", "Middle click", "three_dots_tap"),
+        GestureEntry("Swipe up", "Task View", "three_dots_up"),
+        GestureEntry("Swipe down", "Show Desktop", "three_dots_down"),
+        GestureEntry("Swipe left/right", "Switch apps", "three_dots_side"),
+    ),
+    "4-finger" to listOf(
+        GestureEntry("Tap", "Notification Center", "four_dots_tap"),
+        GestureEntry("Swipe left/right", "Switch virtual desktop", "four_dots_side"),
+        GestureEntry("Swipe up", "Task View", "four_dots_up"),
+        GestureEntry("Swipe down", "Show Desktop", "four_dots_down"),
+    )
+)
+
+@Composable
+private fun GestureGuideSheet(
+    sections: Map<String, Boolean>,
+    onToggleSection: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable { onDismiss() }
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxSize(0.55f)
+                .background(
+                    Color(0xFF1C1C24),
+                    RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                )
+                .clickable(enabled = false) {}
+        ) {
+            // Drag handle
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.3f))
+                )
+            }
+
+            // Title
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Gestures",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Close",
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Gesture list
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 16.dp)
+            ) {
+                gestureData.forEach { (sectionKey, entries) ->
+                    val isExpanded = sections[sectionKey] ?: true
+                    val sectionLabel = sectionKey.replaceFirstChar { it.uppercase() } + " gestures"
+
+                    item(key = "header_$sectionKey") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggleSection(sectionKey) }
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = sectionLabel,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF7B7FD4)
+                            )
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.5f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    if (isExpanded) {
+                        items(entries, key = { "${sectionKey}_${it.gesture}" }) { entry ->
+                            GestureEntryRow(
+                                entry = entry,
+                                dotCount = sectionKey.first().digitToIntOrNull() ?: 1
+                            )
+                        }
+                    }
+
+                    item(key = "divider_$sectionKey") {
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.06f),
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GestureEntryRow(entry: GestureEntry, dotCount: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Illustration: stylized finger dots on a rounded surface
+        GestureIllustration(
+            type = entry.illustrationType,
+            dotCount = dotCount,
+            modifier = Modifier.size(48.dp)
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.gesture,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White
+            )
+            Text(
+                text = entry.action,
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.5f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun GestureIllustration(type: String, dotCount: Int, modifier: Modifier = Modifier) {
+    val teal = Color(0xFF2DD4BF)
+    val surfaceColor = Color(0xFF2A2A38)
+
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val padW = w * 0.1f
+        val padH = h * 0.1f
+
+        // Rounded-rectangle surface
+        drawRoundRect(
+            color = surfaceColor,
+            topLeft = Offset(padW, padH),
+            size = Size(w - padW * 2, h - padH * 2),
+            cornerRadius = CornerRadius(6f, 6f)
+        )
+
+        val cx = w / 2f
+        val cy = h / 2f
+        val dotRadius = w * 0.055f
+        val spacing = w * 0.12f
+
+        when {
+            type.contains("tap_ripple") || type.contains("press_trail") -> {
+                drawCircle(teal, dotRadius * 1.2f, Offset(cx, cy))
+                drawCircle(teal.copy(alpha = 0.3f), dotRadius * 2.5f, Offset(cx, cy), style = Stroke(1.5f))
+            }
+            type.contains("arrow_trail") -> {
+                drawCircle(teal, dotRadius * 1.1f, Offset(cx - spacing, cy))
+                val path = Path().apply {
+                    moveTo(cx - spacing * 0.5f, cy)
+                    lineTo(cx + spacing * 1.2f, cy)
+                }
+                drawPath(path, teal.copy(alpha = 0.5f), style = Stroke(1.5f, cap = StrokeCap.Round))
+                // arrowhead
+                drawLine(teal.copy(alpha = 0.5f), Offset(cx + spacing * 0.9f, cy - spacing * 0.3f), Offset(cx + spacing * 1.2f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.5f), Offset(cx + spacing * 0.9f, cy + spacing * 0.3f), Offset(cx + spacing * 1.2f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            }
+            type.contains("two_dots_vertical") -> {
+                drawCircle(teal, dotRadius, Offset(cx - spacing * 0.5f, cy))
+                drawCircle(teal, dotRadius, Offset(cx + spacing * 0.5f, cy))
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx, cy - spacing * 1.2f), Offset(cx, cy + spacing * 1.2f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                // arrows
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx - spacing * 0.3f, cy - spacing * 0.8f), Offset(cx, cy - spacing * 1.2f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx + spacing * 0.3f, cy - spacing * 0.8f), Offset(cx, cy - spacing * 1.2f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx - spacing * 0.3f, cy + spacing * 0.8f), Offset(cx, cy + spacing * 1.2f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx + spacing * 0.3f, cy + spacing * 0.8f), Offset(cx, cy + spacing * 1.2f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            }
+            type.contains("two_dots_horizontal") -> {
+                drawCircle(teal, dotRadius, Offset(cx, cy - spacing * 0.4f))
+                drawCircle(teal, dotRadius, Offset(cx, cy + spacing * 0.4f))
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx - spacing * 1.2f, cy), Offset(cx + spacing * 1.2f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            }
+            type.contains("two_dots_tap") -> {
+                drawCircle(teal, dotRadius, Offset(cx - spacing * 0.5f, cy))
+                drawCircle(teal, dotRadius, Offset(cx + spacing * 0.5f, cy))
+                drawCircle(teal.copy(alpha = 0.25f), dotRadius * 2.2f, Offset(cx, cy), style = Stroke(1.5f))
+            }
+            type.contains("pinch") -> {
+                drawCircle(teal, dotRadius, Offset(cx - spacing * 0.8f, cy))
+                drawCircle(teal, dotRadius, Offset(cx + spacing * 0.8f, cy))
+                // arrows pointing outward
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx - spacing * 0.3f, cy), Offset(cx - spacing * 1.3f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx + spacing * 0.3f, cy), Offset(cx + spacing * 1.3f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            }
+            type.contains("three_dots_tap") || type.contains("four_dots_tap") -> {
+                val count = if (type.contains("four")) 4 else 3
+                val totalW = (count - 1) * spacing
+                val startX = cx - totalW / 2f
+                for (i in 0 until count) {
+                    drawCircle(teal, dotRadius, Offset(startX + i * spacing, cy))
+                }
+                drawCircle(teal.copy(alpha = 0.25f), dotRadius * 2.5f, Offset(cx, cy), style = Stroke(1.5f))
+            }
+            type.contains("three_dots_up") || type.contains("four_dots_up") -> {
+                val count = if (type.contains("four")) 4 else 3
+                val totalW = (count - 1) * spacing
+                val startX = cx - totalW / 2f
+                for (i in 0 until count) {
+                    drawCircle(teal, dotRadius, Offset(startX + i * spacing, cy + spacing * 0.3f))
+                }
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx, cy + spacing * 0.3f), Offset(cx, cy - spacing * 1.0f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx - spacing * 0.3f, cy - spacing * 0.6f), Offset(cx, cy - spacing * 1.0f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx + spacing * 0.3f, cy - spacing * 0.6f), Offset(cx, cy - spacing * 1.0f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            }
+            type.contains("three_dots_down") || type.contains("four_dots_down") -> {
+                val count = if (type.contains("four")) 4 else 3
+                val totalW = (count - 1) * spacing
+                val startX = cx - totalW / 2f
+                for (i in 0 until count) {
+                    drawCircle(teal, dotRadius, Offset(startX + i * spacing, cy - spacing * 0.3f))
+                }
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx, cy - spacing * 0.3f), Offset(cx, cy + spacing * 1.0f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx - spacing * 0.3f, cy + spacing * 0.6f), Offset(cx, cy + spacing * 1.0f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx + spacing * 0.3f, cy + spacing * 0.6f), Offset(cx, cy + spacing * 1.0f), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            }
+            type.contains("three_dots_side") || type.contains("four_dots_side") -> {
+                val count = if (type.contains("four")) 4 else 3
+                val totalW = (count - 1) * spacing
+                val startX = cx - totalW / 2f
+                for (i in 0 until count) {
+                    drawCircle(teal, dotRadius, Offset(startX + i * spacing, cy))
+                }
+                // side arrows
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx - spacing * 1.5f, cy), Offset(cx - spacing * 2.2f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
+                drawLine(teal.copy(alpha = 0.4f), Offset(cx + spacing * 1.5f, cy), Offset(cx + spacing * 2.2f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            }
+        }
     }
 }
