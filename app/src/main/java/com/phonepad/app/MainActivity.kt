@@ -573,6 +573,7 @@ class MainActivity : ComponentActivity() {
                         connectionStatus = connectionStatus,
                         bondedDevices = bondedDevices,
                         isConnected = connectedDevice != null,
+                        connectedHostName = connectedDevice?.name,
                         onDeviceSelected = { device -> connectToDevice(device) },
                         onTouchEvent = { event -> handleTrackpadTouch(event) },
                         showSettings = showSettings,
@@ -1689,6 +1690,7 @@ fun PhonePadScreen(
     connectionStatus: String,
     bondedDevices: List<BluetoothDevice>,
     isConnected: Boolean,
+    connectedHostName: String?,
     onDeviceSelected: (BluetoothDevice) -> Unit,
     onTouchEvent: (MotionEvent) -> Boolean,
     showSettings: Boolean,
@@ -1720,7 +1722,7 @@ fun PhonePadScreen(
         DiagnosticRow("Permission:", permissionStatus)
         DiagnosticRow("HID Device Profile:", hidProfileStatus)
         DiagnosticRow("HID App Registration:", registrationStatus)
-        DiagnosticRow("Connection:", connectionStatus)
+        DiagnosticRow("Connection:", if (isConnected && connectedHostName != null) "CONNECTED to $connectedHostName" else connectionStatus)
 
         Spacer(modifier = Modifier.height(12.dp))
 
