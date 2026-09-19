@@ -82,6 +82,11 @@ class MainActivity : ComponentActivity() {
         private const val CURSOR_OUTPUT_INTERVAL_MS = 8L
         private const val CURSOR_VELOCITY_SMOOTHING = 0.5f
 
+        // Milestone 4.2 palm rejection
+        private const val PALM_TOUCH_MAJOR_THRESHOLD_DP = 40f
+        private const val PALM_GRACE_PERIOD_MS = 80L
+        private const val PALM_GRACE_MOVEMENT_DP = 4f
+
         // Two-finger tap → right-click
         private const val TWO_FINGER_TAP_DURATION_MS = 300L
         private const val TWO_FINGER_TAP_MOVEMENT_DP = 15f
@@ -155,6 +160,13 @@ class MainActivity : ComponentActivity() {
     private var autoReconnectAttempted = false
     private var bluetoothReceiverRegistered = false
     private var isHidAppRegistered = false
+
+    // Milestone 4.2 palm rejection
+    private var palmTouchMajorThresholdPx = 0f
+    private var palmGraceMovementThresholdPx = 0f
+    private var primaryPointerGraceActive = false
+    private var primaryPointerGraceStartTime = 0L
+    private var primaryPointerConfirmed = false
 
     // Milestone 4.1 cursor output cadence & smoothing
     private var cursorVelocityX = 0f
@@ -503,6 +515,8 @@ class MainActivity : ComponentActivity() {
         pinchPixelsPerStep = PINCH_PIXELS_PER_STEP_DP * resources.displayMetrics.density
         multiFingerSwipeThresholdPx = MULTI_FINGER_SWIPE_THRESHOLD_DP * resources.displayMetrics.density
         multiFingerTapMovementThresholdPx = MULTI_FINGER_TAP_MOVEMENT_DP * resources.displayMetrics.density
+        palmTouchMajorThresholdPx = PALM_TOUCH_MAJOR_THRESHOLD_DP * resources.displayMetrics.density
+        palmGraceMovementThresholdPx = PALM_GRACE_MOVEMENT_DP * resources.displayMetrics.density
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -1365,6 +1379,21 @@ class MainActivity : ComponentActivity() {
         touchDownTime = SystemClock.uptimeMillis()
         touchDownX = event.x
         touchDownY = event.y
+
+        if (isPalmContact(event, 0)) {
+            Log.d(TAG, "Palm rejected on DOWN (touchMajor=${event.getTouchMajor(0)})")
+            tapEligible = false
+            dragEligible = false
+            fingerDown = false
+            primaryPointerConfirmed = false
+            primaryPointerGraceActive = false
+            return true
+        }
+
+        primaryPointerConfirmed = false
+        primaryPointerGraceActive = true
+        primaryPointerGraceStartTime = SystemClock.uptimeMillis()
+
         tapEligible = true
         dragEligible = true
         isDragging = false
@@ -1374,13 +1403,46 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
+    private fun isPalmContact(event: MotionEvent, pointerIndex: Int): Boolean {
+        val major = event.getTouchMajor(pointerIndex)
+        return major > palmTouchMajorThresholdPx && palmTouchMajorThresholdPx > 0f
+    }
+
     private fun handleSingleFingerMove(event: MotionEvent): Boolean {
+        if (isPalmContact(event, 0)) {
+            stopCursorOutput()
+            return true
+        }
+
         val dx = event.x - previousX
         val dy = event.y - previousY
         val dtMs = event.eventTime - previousEventTime
         previousX = event.x
         previousY = event.y
         previousEventTime = event.eventTime
+
+        if (primaryPointerGraceActive && !primaryPointerConfirmed) {
+            val distX = event.x - touchDownX
+            val distY = event.y - touchDownY
+            val dist = sqrt(distX * distX + distY * distY)
+            val elapsed = SystemClock.uptimeMillis() - primaryPointerGraceStartTime
+
+            if (dist >= palmGraceMovementThresholdPx) {
+                primaryPointerConfirmed = true
+                primaryPointerGraceActive = false
+            } else if (elapsed >= PALM_GRACE_PERIOD_MS) {
+                Log.d(TAG, "Palm rejected: no movement within grace period")
+                primaryPointerGraceActive = false
+                tapEligible = false
+                dragEligible = false
+                handler.removeCallbacks(dragTriggerRunnable)
+                return true
+            } else {
+                return true
+            }
+        }
+
+        if (!primaryPointerConfirmed && !isDragging) return true
 
         if (!isDragging) {
             val distX = event.x - touchDownX
@@ -1494,9 +1556,9 @@ class MainActivity : ComponentActivity() {
         val speed = distance / dt
 
         val gain = when {
-            speed <= 1.0f -> 0.5f
-            speed <= 4.0f -> 0.5f + (speed - 1.0f) * (1.0f - 0.5f) / (4.0f - 1.0f)
-            else -> 1.4f
+            speed <= 1.0f -> 0.7f
+            speed <= 4.0f -> 0.7f + (speed - 1.0f) * (1.3f - 0.7f) / (4.0f - 1.0f)
+            else -> 1.9f
         }
 
         val outX = (dx * gain).toInt().coerceIn(-127, 127)
