@@ -27,20 +27,27 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -67,6 +74,9 @@ class MainActivity : ComponentActivity() {
         private const val DRAG_HOLD_MS = 350L
         private const val PREFS_NAME = "phonepad_prefs"
         private const val PREF_LAST_HOST_ADDRESS = "last_host_address"
+        private const val PREF_SENSITIVITY = "_sensitivity"
+        private const val PREF_TAP_TO_CLICK = "_tap_to_click"
+        private const val PREF_NATURAL_SCROLL = "_natural_scroll"
 
         private const val SCROLL_PIXELS_PER_NOTCH = 12f
         private const val SCROLL_DIRECTION = 1
@@ -160,6 +170,12 @@ class MainActivity : ComponentActivity() {
     private var autoReconnectAttempted = false
     private var bluetoothReceiverRegistered = false
     private var isHidAppRegistered = false
+
+    // Milestone 4.4 settings & customization
+    private var sensitivityMultiplier by mutableFloatStateOf(1.0f)
+    private var tapToClickEnabled by mutableStateOf(true)
+    private var naturalScrollEnabled by mutableStateOf(false)
+    private var showSettings by mutableStateOf(false)
 
     // Milestone 4.2 palm rejection
     private var palmTouchMajorThresholdPx = 0f
@@ -400,6 +416,7 @@ class MainActivity : ComponentActivity() {
                     connectedDevice = device
                     if (device != null) {
                         saveLastHost(device.address)
+                        loadHostSettings(device.address)
                     }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -558,6 +575,14 @@ class MainActivity : ComponentActivity() {
                         isConnected = connectedDevice != null,
                         onDeviceSelected = { device -> connectToDevice(device) },
                         onTouchEvent = { event -> handleTrackpadTouch(event) },
+                        showSettings = showSettings,
+                        onToggleSettings = { showSettings = !showSettings },
+                        sensitivity = sensitivityMultiplier,
+                        onSensitivityChange = { sensitivityMultiplier = it; saveHostSettings() },
+                        tapToClick = tapToClickEnabled,
+                        onTapToClickChange = { tapToClickEnabled = it; saveHostSettings() },
+                        naturalScroll = naturalScrollEnabled,
+                        onNaturalScrollChange = { naturalScrollEnabled = it; saveHostSettings() },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -783,8 +808,10 @@ class MainActivity : ComponentActivity() {
         if (countsY != 0 || countsX != 0) {
             scrollAccumulator -= countsY * pixelsPerCount
             scrollAccumulatorX -= countsX * pixelsPerCount
-            val wheelY = (countsY * SCROLL_DIRECTION).coerceIn(-127, 127)
-            val wheelX = (countsX * SCROLL_DIRECTION_H).coerceIn(-127, 127)
+            val scrollDir = if (naturalScrollEnabled) -SCROLL_DIRECTION else SCROLL_DIRECTION
+            val scrollDirH = if (naturalScrollEnabled) -SCROLL_DIRECTION_H else SCROLL_DIRECTION_H
+            val wheelY = (countsY * scrollDir).coerceIn(-127, 127)
+            val wheelX = (countsX * scrollDirH).coerceIn(-127, 127)
             sendMouseReport(0x00, 0, 0, wheelY, wheelX)
         }
 
@@ -797,6 +824,23 @@ class MainActivity : ComponentActivity() {
     private fun saveLastHost(address: String) {
         Log.d(TAG, "Saving last host: $address")
         prefs.edit().putString(PREF_LAST_HOST_ADDRESS, address).apply()
+    }
+
+    private fun loadHostSettings(address: String) {
+        sensitivityMultiplier = prefs.getFloat(address + PREF_SENSITIVITY, 1.0f)
+        tapToClickEnabled = prefs.getBoolean(address + PREF_TAP_TO_CLICK, true)
+        naturalScrollEnabled = prefs.getBoolean(address + PREF_NATURAL_SCROLL, false)
+        Log.d(TAG, "Loaded settings for $address: sensitivity=$sensitivityMultiplier, tapToClick=$tapToClickEnabled, naturalScroll=$naturalScrollEnabled")
+    }
+
+    private fun saveHostSettings() {
+        val address = connectedDevice?.address ?: return
+        prefs.edit()
+            .putFloat(address + PREF_SENSITIVITY, sensitivityMultiplier)
+            .putBoolean(address + PREF_TAP_TO_CLICK, tapToClickEnabled)
+            .putBoolean(address + PREF_NATURAL_SCROLL, naturalScrollEnabled)
+            .apply()
+        Log.d(TAG, "Saved settings for $address")
     }
 
     @SuppressLint("MissingPermission")
@@ -1523,6 +1567,9 @@ class MainActivity : ComponentActivity() {
         } else {
             val duration = SystemClock.uptimeMillis() - touchDownTime
             when {
+                !tapToClickEnabled -> {
+                    Log.d(TAG, "Tap suppressed: tap-to-click disabled")
+                }
                 !tapEligible -> {
                     Log.d(TAG, "Tap suppressed: movement threshold exceeded during gesture")
                 }
@@ -1561,8 +1608,9 @@ class MainActivity : ComponentActivity() {
             else -> 1.9f
         }
 
-        val outX = (dx * gain).toInt().coerceIn(-127, 127)
-        val outY = (dy * gain).toInt().coerceIn(-127, 127)
+        val finalGain = gain * sensitivityMultiplier
+        val outX = (dx * finalGain).toInt().coerceIn(-127, 127)
+        val outY = (dy * finalGain).toInt().coerceIn(-127, 127)
         return Pair(outX, outY)
     }
 
@@ -1643,6 +1691,14 @@ fun PhonePadScreen(
     isConnected: Boolean,
     onDeviceSelected: (BluetoothDevice) -> Unit,
     onTouchEvent: (MotionEvent) -> Boolean,
+    showSettings: Boolean,
+    onToggleSettings: () -> Unit,
+    sensitivity: Float,
+    onSensitivityChange: (Float) -> Unit,
+    tapToClick: Boolean,
+    onTapToClickChange: (Boolean) -> Unit,
+    naturalScroll: Boolean,
+    onNaturalScrollChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -1686,6 +1742,74 @@ fun PhonePadScreen(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        if (isConnected) {
+            Text(
+                text = if (showSettings) "Hide Settings" else "Settings",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable { onToggleSettings() }
+                    .padding(vertical = 4.dp)
+            )
+
+            if (showSettings) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(12.dp)
+                ) {
+                    Text("Sensitivity", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Slow", fontSize = 11.sp)
+                        Slider(
+                            value = sensitivity,
+                            onValueChange = onSensitivityChange,
+                            valueRange = 0.3f..2.0f,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("Fast", fontSize = 11.sp)
+                    }
+                    Text(
+                        text = "%.1fx".format(sensitivity),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Tap to Click", fontSize = 13.sp)
+                        Switch(checked = tapToClick, onCheckedChange = onTapToClickChange)
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Natural Scroll", fontSize = 13.sp)
+                        Switch(checked = naturalScroll, onCheckedChange = onNaturalScrollChange)
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
         }
 
         Box(
