@@ -96,11 +96,15 @@ class MainActivity : ComponentActivity() {
         // HID keycodes we use in Phase 3
         private const val KEY_TAB: Byte = 0x2B
         private const val KEY_D: Byte = 0x07
+        private const val KEY_N: Byte = 0x11
+        private const val KEY_ARROW_RIGHT: Byte = 0x4F
+        private const val KEY_ARROW_LEFT: Byte = 0x50
 
-        // Milestone 3.2 three-finger gestures
-        private const val THREE_FINGER_SWIPE_THRESHOLD_DP = 15f
-        private const val THREE_FINGER_TAP_DURATION_MS = 500L
-        private const val THREE_FINGER_TAP_MOVEMENT_DP = 15f
+        // Milestones 3.2 (3-finger) and 3.3 (4-finger) share the multi-finger
+        // gesture pipeline — thresholds tuned once for both.
+        private const val MULTI_FINGER_SWIPE_THRESHOLD_DP = 15f
+        private const val MULTI_FINGER_TAP_DURATION_MS = 500L
+        private const val MULTI_FINGER_TAP_MOVEMENT_DP = 15f
 
         private const val RESOLUTION_MULTIPLIER_PHYSICAL_MIN = 1
         private const val RESOLUTION_MULTIPLIER_PHYSICAL_MAX = 8
@@ -181,15 +185,16 @@ class MainActivity : ComponentActivity() {
     private var pinchPixelsPerStep = 0f
     private var ctrlHeldForPinch = false
 
-    // Milestone 3.2 three-finger gestures
-    private var threeFingerActive = false
-    private var threeFingerDownTime = 0L
-    private var threeFingerInitialCentroidX = 0f
-    private var threeFingerInitialCentroidY = 0f
-    private var threeFingerCurrentCentroidX = 0f
-    private var threeFingerCurrentCentroidY = 0f
-    private var threeFingerSwipeThresholdPx = 0f
-    private var threeFingerTapMovementThresholdPx = 0f
+    // Milestones 3.2 + 3.3 multi-finger gestures (3-finger and 4-finger)
+    private var multiFingerActive = false
+    private var multiFingerMaxCount = 0
+    private var multiFingerDownTime = 0L
+    private var multiFingerInitialCentroidX = 0f
+    private var multiFingerInitialCentroidY = 0f
+    private var multiFingerCurrentCentroidX = 0f
+    private var multiFingerCurrentCentroidY = 0f
+    private var multiFingerSwipeThresholdPx = 0f
+    private var multiFingerTapMovementThresholdPx = 0f
 
     // High-resolution wheel
     private var wheelResolutionMultiplierRaw = 0
@@ -485,8 +490,8 @@ class MainActivity : ComponentActivity() {
         scrollAxisLockThresholdPx = SCROLL_AXIS_LOCK_THRESHOLD_DP * resources.displayMetrics.density
         pinchDistanceThresholdPx = PINCH_DISTANCE_THRESHOLD_DP * resources.displayMetrics.density
         pinchPixelsPerStep = PINCH_PIXELS_PER_STEP_DP * resources.displayMetrics.density
-        threeFingerSwipeThresholdPx = THREE_FINGER_SWIPE_THRESHOLD_DP * resources.displayMetrics.density
-        threeFingerTapMovementThresholdPx = THREE_FINGER_TAP_MOVEMENT_DP * resources.displayMetrics.density
+        multiFingerSwipeThresholdPx = MULTI_FINGER_SWIPE_THRESHOLD_DP * resources.displayMetrics.density
+        multiFingerTapMovementThresholdPx = MULTI_FINGER_TAP_MOVEMENT_DP * resources.displayMetrics.density
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -666,7 +671,8 @@ class MainActivity : ComponentActivity() {
         initialFingerDistance = 0f
         previousFingerDistance = 0f
         if (ctrlHeldForPinch) releaseCtrlForPinch()
-        threeFingerActive = false
+        multiFingerActive = false
+        multiFingerMaxCount = 0
     }
 
     private fun resetWheelMultiplier() {
@@ -892,18 +898,18 @@ class MainActivity : ComponentActivity() {
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 enterMultiTouch()
-                activateThreeFingerIfNeeded(event)
-                if (!threeFingerActive && event.pointerCount == 2) {
+                activateMultiFingerIfNeeded(event)
+                if (!multiFingerActive && event.pointerCount == 2) {
                     beginTwoFingerScroll(event)
                 }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 // Fallback: some Android touch drivers skip ACTION_POINTER_DOWN
-                // for the 3rd finger — we still catch it here.
-                activateThreeFingerIfNeeded(event)
-                if (threeFingerActive) {
-                    handleThreeFingerMove(event)
+                // for the 3rd / 4th finger — we still catch it here.
+                activateMultiFingerIfNeeded(event)
+                if (multiFingerActive) {
+                    handleMultiFingerMove(event)
                     return true
                 }
                 if (event.pointerCount == 2 && isTwoFingerScrolling) {
@@ -916,9 +922,9 @@ class MainActivity : ComponentActivity() {
                 return true
             }
             MotionEvent.ACTION_POINTER_UP -> {
-                if (threeFingerActive) {
-                    // Any finger lift during a 3-finger gesture ends it.
-                    endThreeFingerGesture()
+                if (multiFingerActive) {
+                    // Any finger lift during a multi-finger gesture ends it.
+                    endMultiFingerGesture()
                     return true
                 }
                 if (isTwoFingerScrolling) {
@@ -937,9 +943,9 @@ class MainActivity : ComponentActivity() {
                 return true
             }
             MotionEvent.ACTION_UP -> {
-                if (threeFingerActive) {
+                if (multiFingerActive) {
                     // Rare: all fingers lifted at once (only ACTION_UP fired).
-                    endThreeFingerGesture()
+                    endMultiFingerGesture()
                     gestureContainedMultiTouch = false
                     fingerDown = false
                     return true
@@ -965,12 +971,12 @@ class MainActivity : ComponentActivity() {
                 return handleSingleFingerUp()
             }
             MotionEvent.ACTION_CANCEL -> {
-                // If we were tracking a 3-finger gesture, treat CANCEL as the
-                // end of the gesture and fire the classified action based on
-                // the movement we saw. Some Compose/OEM touch pipelines send
-                // CANCEL instead of ACTION_POINTER_UP for multi-touch.
-                if (threeFingerActive) {
-                    endThreeFingerGesture()
+                // If we were tracking a multi-finger gesture, treat CANCEL as
+                // the end of the gesture and fire the classified action based
+                // on the movement we saw. Some Compose/OEM touch pipelines
+                // send CANCEL instead of ACTION_POINTER_UP for multi-touch.
+                if (multiFingerActive) {
+                    endMultiFingerGesture()
                 }
                 stopScrollOutput()
                 handler.removeCallbacks(dragTriggerRunnable)
@@ -990,7 +996,8 @@ class MainActivity : ComponentActivity() {
                 scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
                 if (ctrlHeldForPinch) releaseCtrlForPinch()
                 twoFingerMode = TwoFingerMode.UNDECIDED
-                threeFingerActive = false
+                multiFingerActive = false
+                multiFingerMaxCount = 0
                 Log.d(TAG, "Touch cancelled")
                 return true
             }
@@ -1208,9 +1215,17 @@ class MainActivity : ComponentActivity() {
         hid.sendReport(device, INPUT_REPORT_ID, up)
     }
 
-    private fun activateThreeFingerIfNeeded(event: MotionEvent) {
-        if (event.pointerCount >= 3 && !threeFingerActive) {
-            beginThreeFingerGesture(event)
+    private fun activateMultiFingerIfNeeded(event: MotionEvent) {
+        if (event.pointerCount >= 3) {
+            if (!multiFingerActive) {
+                beginMultiFingerGesture(event)
+            }
+            // Always keep multiFingerMaxCount at the highest pointerCount
+            // observed during the gesture. This is what lets us distinguish
+            // 3-finger vs 4-finger when classification runs on end.
+            if (event.pointerCount > multiFingerMaxCount) {
+                multiFingerMaxCount = event.pointerCount
+            }
         }
     }
 
@@ -1226,11 +1241,11 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Begin a three-finger gesture. Cancels any two-finger tracking state so
-     * a briefly-3-finger touch can't accidentally fire scroll, pinch or the
-     * two-finger tap right-click.
+     * Begin a multi-finger (3 or 4) gesture. Cancels any two-finger tracking
+     * state so a briefly-multi-finger touch can't accidentally fire scroll,
+     * pinch or the two-finger tap right-click.
      */
-    private fun beginThreeFingerGesture(event: MotionEvent) {
+    private fun beginMultiFingerGesture(event: MotionEvent) {
         stopScrollOutput()
         if (ctrlHeldForPinch) releaseCtrlForPinch()
         isTwoFingerScrolling = false
@@ -1239,67 +1254,94 @@ class MainActivity : ComponentActivity() {
         scrollAccumulator = 0f; scrollAccumulatorX = 0f
         scrollVelocityPxPerMs = 0f; scrollVelocityXPxPerMs = 0f
 
-        threeFingerActive = true
-        threeFingerDownTime = SystemClock.uptimeMillis()
+        multiFingerActive = true
+        multiFingerMaxCount = event.pointerCount
+        multiFingerDownTime = SystemClock.uptimeMillis()
         val (cx, cy) = computeCentroid(event)
-        threeFingerInitialCentroidX = cx
-        threeFingerInitialCentroidY = cy
-        threeFingerCurrentCentroidX = cx
-        threeFingerCurrentCentroidY = cy
-        Log.d(TAG, "Three-finger gesture started at ($cx, $cy), n=${event.pointerCount}")
+        multiFingerInitialCentroidX = cx
+        multiFingerInitialCentroidY = cy
+        multiFingerCurrentCentroidX = cx
+        multiFingerCurrentCentroidY = cy
+        Log.d(TAG, "Multi-finger gesture started at ($cx, $cy), n=${event.pointerCount}")
     }
 
-    private fun handleThreeFingerMove(event: MotionEvent) {
+    private fun handleMultiFingerMove(event: MotionEvent) {
+        // Also promote the max count if a 4th (or higher) finger arrives
+        // via MOVE rather than POINTER_DOWN.
+        if (event.pointerCount > multiFingerMaxCount) {
+            multiFingerMaxCount = event.pointerCount
+        }
         val (cx, cy) = computeCentroid(event)
-        threeFingerCurrentCentroidX = cx
-        threeFingerCurrentCentroidY = cy
+        multiFingerCurrentCentroidX = cx
+        multiFingerCurrentCentroidY = cy
     }
 
     /**
-     * Called on ACTION_POINTER_UP when the gesture is transitioning from 3
-     * fingers back to 2. Classifies the gesture as tap or directional swipe
-     * and fires the corresponding Windows shortcut.
+     * Called when the multi-finger gesture ends. Classifies as tap or
+     * directional swipe and dispatches to the 3-finger or 4-finger action
+     * set based on the maximum pointer count observed during the gesture.
      */
-    private fun endThreeFingerGesture() {
-        val dx = threeFingerCurrentCentroidX - threeFingerInitialCentroidX
-        val dy = threeFingerCurrentCentroidY - threeFingerInitialCentroidY
+    private fun endMultiFingerGesture() {
+        val dx = multiFingerCurrentCentroidX - multiFingerInitialCentroidX
+        val dy = multiFingerCurrentCentroidY - multiFingerInitialCentroidY
         val absDx = abs(dx)
         val absDy = abs(dy)
-        val duration = SystemClock.uptimeMillis() - threeFingerDownTime
+        val duration = SystemClock.uptimeMillis() - multiFingerDownTime
         val dxI = dx.toInt(); val dyI = dy.toInt()
+        val fourFinger = multiFingerMaxCount >= 4
+
+        val kind: String = when {
+            duration <= MULTI_FINGER_TAP_DURATION_MS &&
+                absDx <= multiFingerTapMovementThresholdPx &&
+                absDy <= multiFingerTapMovementThresholdPx -> "TAP"
+            absDy > absDx && absDy > multiFingerSwipeThresholdPx ->
+                if (dy < 0) "UP" else "DOWN"
+            absDx > absDy && absDx > multiFingerSwipeThresholdPx ->
+                if (dx < 0) "LEFT" else "RIGHT"
+            else -> "NONE"
+        }
 
         val summary: String
         when {
-            duration <= THREE_FINGER_TAP_DURATION_MS &&
-                absDx <= threeFingerTapMovementThresholdPx &&
-                absDy <= threeFingerTapMovementThresholdPx -> {
-                summary = "TAP → middle click (dur=${duration}ms)"
+            kind == "TAP" && fourFinger -> {
+                summary = "4f TAP → Notification Center (Win+N)"
+                sendKeyPress(KEY_MOD_LGUI, KEY_N)
+            }
+            kind == "TAP" -> {
+                summary = "3f TAP → middle click (dur=${duration}ms)"
                 sendMiddleClick()
             }
-            absDy > absDx && absDy > threeFingerSwipeThresholdPx -> {
-                if (dy < 0) {
-                    summary = "UP → Task View (dy=$dyI)"
-                    sendKeyPress(KEY_MOD_LGUI, KEY_TAB)
-                } else {
-                    summary = "DOWN → Show Desktop (dy=$dyI)"
-                    sendKeyPress(KEY_MOD_LGUI, KEY_D)
-                }
+            kind == "UP" -> {
+                summary = "${if (fourFinger) "4f" else "3f"} UP → Task View (dy=$dyI)"
+                sendKeyPress(KEY_MOD_LGUI, KEY_TAB)
             }
-            absDx > absDy && absDx > threeFingerSwipeThresholdPx -> {
-                if (dx < 0) {
-                    summary = "LEFT → prev app (dx=$dxI)"
-                    sendKeyPress((KEY_MOD_LALT.toInt() or KEY_MOD_LSHIFT.toInt()).toByte(), KEY_TAB)
-                } else {
-                    summary = "RIGHT → next app (dx=$dxI)"
-                    sendKeyPress(KEY_MOD_LALT, KEY_TAB)
-                }
+            kind == "DOWN" -> {
+                summary = "${if (fourFinger) "4f" else "3f"} DOWN → Show Desktop (dy=$dyI)"
+                sendKeyPress(KEY_MOD_LGUI, KEY_D)
+            }
+            kind == "LEFT" && fourFinger -> {
+                summary = "4f LEFT → prev virtual desktop (Ctrl+Win+Left, dx=$dxI)"
+                sendKeyPress((KEY_MOD_LCTRL.toInt() or KEY_MOD_LGUI.toInt()).toByte(), KEY_ARROW_LEFT)
+            }
+            kind == "LEFT" -> {
+                summary = "3f LEFT → prev app (Alt+Shift+Tab, dx=$dxI)"
+                sendKeyPress((KEY_MOD_LALT.toInt() or KEY_MOD_LSHIFT.toInt()).toByte(), KEY_TAB)
+            }
+            kind == "RIGHT" && fourFinger -> {
+                summary = "4f RIGHT → next virtual desktop (Ctrl+Win+Right, dx=$dxI)"
+                sendKeyPress((KEY_MOD_LCTRL.toInt() or KEY_MOD_LGUI.toInt()).toByte(), KEY_ARROW_RIGHT)
+            }
+            kind == "RIGHT" -> {
+                summary = "3f RIGHT → next app (Alt+Tab, dx=$dxI)"
+                sendKeyPress(KEY_MOD_LALT, KEY_TAB)
             }
             else -> {
-                summary = "no action (dx=$dxI dy=$dyI dur=${duration}ms)"
+                summary = "no action (n=$multiFingerMaxCount dx=$dxI dy=$dyI dur=${duration}ms)"
             }
         }
-        Log.d(TAG, "Three-finger: $summary")
-        threeFingerActive = false
+        Log.d(TAG, "Multi-finger: $summary")
+        multiFingerActive = false
+        multiFingerMaxCount = 0
     }
 
     private fun handleSingleFingerDown(event: MotionEvent): Boolean {
@@ -1557,7 +1599,7 @@ fun PhonePadScreen(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isConnected) "1 finger: cursor / tap / hold-drag\n2 fingers: scroll or pinch-zoom\n2-finger tap: right-click\n3 fingers up: Task View  ·  down: Show Desktop\n3 fingers L/R: switch apps  ·  tap: middle-click"
+                text = if (isConnected) "1 finger: cursor / tap / hold-drag\n2 fingers: scroll or pinch-zoom  ·  tap: right-click\n3 fingers: swipe or tap (middle-click)\n4 fingers L/R: virtual desktop  ·  tap: Notification Center"
                        else "Not connected",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
