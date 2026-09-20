@@ -3817,26 +3817,61 @@ private fun SettingsOverlay(
                 .clickable(enabled = false) {}
         ) {
             // ── Gradient Header (logo + device banner) ──
-            val glassWhite = Color.White.copy(alpha = 0.18f)
-            val glassBorder = Color.White.copy(alpha = 0.25f)
+            val glassWhite = Color.White.copy(alpha = 0.16f)
+            val glassBorder = Color.White.copy(alpha = 0.28f)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 20.dp, bottomEnd = 20.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .shadow(
+                        elevation = 10.dp,
+                        shape = RoundedCornerShape(22.dp),
+                        ambientColor = Color(0x503730A3),
+                        spotColor = Color(0x604F46E5)
+                    )
+                    .clip(RoundedCornerShape(22.dp))
                     .background(
                         Brush.linearGradient(
-                            colors = listOf(Color(0xFF6C5CE7), Color(0xFF9D8DF7), Color(0xFFB8A9FB)),
+                            colors = listOf(
+                                Color(0xFF3730A3), // Deep Royal Indigo
+                                Color(0xFF4F46E5), // Electric Indigo
+                                Color(0xFF7C3AED), // Vivid Purple
+                                Color(0xFF8B5CF6)  // Luminous Violet
+                            ),
                             start = Offset(0f, 0f),
                             end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
                         )
                     )
+                    .border(
+                        1.dp,
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.35f),
+                                Color.White.copy(alpha = 0.12f)
+                            )
+                        ),
+                        RoundedCornerShape(22.dp)
+                    )
             ) {
-                // Decorative concentric circles
+                // Celestial sonar radar axis with glowing epicenter & orbital rings
                 Canvas(modifier = Modifier.matchParentSize()) {
-                    val cx = size.width * 0.62f
-                    val cy = size.height * 0.38f
-                    val ringColor = Color.White.copy(alpha = 0.06f)
-                    for (r in listOf(100.dp.toPx(), 70.dp.toPx(), 40.dp.toPx())) {
+                    val cx = size.width * 0.52f
+                    val cy = size.height * 0.50f
+
+                    // Soft ambient radial glow behind the epicenter
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color.White.copy(alpha = 0.12f), Color.Transparent),
+                            center = Offset(cx, cy),
+                            radius = 120.dp.toPx()
+                        ),
+                        radius = 120.dp.toPx(),
+                        center = Offset(cx, cy)
+                    )
+
+                    // Concentric sonar rings
+                    val ringColor = Color.White.copy(alpha = 0.08f)
+                    for (r in listOf(115.dp.toPx(), 75.dp.toPx(), 45.dp.toPx())) {
                         drawCircle(
                             color = ringColor,
                             radius = r,
@@ -3844,15 +3879,46 @@ private fun SettingsOverlay(
                             style = Stroke(1.2.dp.toPx())
                         )
                     }
-                    // Small accent dot
+
+                    // Horizontal radar underline axis between the 2 rows across the card
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.24f),
+                        start = Offset(0f, cy),
+                        end = Offset(size.width, cy),
+                        strokeWidth = 1.dp.toPx()
+                    )
+
+                    // Glowing center dot (outer pulse halo + core)
                     drawCircle(
                         color = Color.White.copy(alpha = 0.35f),
-                        radius = 3.dp.toPx(),
+                        radius = 6.dp.toPx(),
                         center = Offset(cx, cy)
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 3.5.dp.toPx(),
+                        center = Offset(cx, cy)
+                    )
+
+                    // Micro-constellation accent dots
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.35f),
+                        radius = 1.5.dp.toPx(),
+                        center = Offset(size.width * 0.15f, cy)
+                    )
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.28f),
+                        radius = 1.8.dp.toPx(),
+                        center = Offset(size.width * 0.42f, cy - 35.dp.toPx())
+                    )
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.22f),
+                        radius = 1.5.dp.toPx(),
+                        center = Offset(size.width * 0.88f, cy)
                     )
                 }
 
-                Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 16.dp)) {
+                Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 18.dp)) {
                     // Top row: app icon + name, theme + close
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -3860,20 +3926,20 @@ private fun SettingsOverlay(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            // App icon — white frosted square
+                            // App icon — solid crisp white squircle tile with drop shadow
                             Box(
                                 modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color.White.copy(alpha = 0.22f))
-                                    .border(1.dp, glassBorder, RoundedCornerShape(12.dp)),
+                                    .size(42.dp)
+                                    .shadow(4.dp, RoundedCornerShape(13.dp), spotColor = Color(0x40000000))
+                                    .clip(RoundedCornerShape(13.dp))
+                                    .background(Color.White),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Filled.TouchApp,
+                                    imageVector = Icons.Filled.PhoneAndroid,
                                     contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
+                                    tint = Color(0xFF4338CA),
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                             Spacer(modifier = Modifier.width(12.dp))
@@ -3881,11 +3947,15 @@ private fun SettingsOverlay(
                                 "PhonePad",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = Color.White,
+                                letterSpacing = (-0.3).sp
                             )
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Theme toggle — glass circle
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Theme toggle — frosted glass circle
                             Box(
                                 modifier = Modifier
                                     .size(38.dp)
@@ -3902,8 +3972,7 @@ private fun SettingsOverlay(
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            // Close — glass circle
+                            // Close — frosted glass circle
                             Box(
                                 modifier = Modifier
                                     .size(38.dp)
@@ -3918,7 +3987,7 @@ private fun SettingsOverlay(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(26.dp))
 
                     // Device banner row inside gradient
                     Row(
@@ -3928,10 +3997,10 @@ private fun SettingsOverlay(
                         // Device icon — frosted rounded square
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.18f))
-                                .border(1.dp, glassBorder, RoundedCornerShape(12.dp)),
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(13.dp))
+                                .background(Color.White.copy(alpha = 0.16f))
+                                .border(1.dp, glassBorder, RoundedCornerShape(13.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -3948,14 +4017,29 @@ private fun SettingsOverlay(
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
-                                lineHeight = 18.sp
+                                lineHeight = 19.sp,
+                                maxLines = 1
                             )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(
+                                        if (isConnected) Color.Black.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.15f),
+                                        RoundedCornerShape(50)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isConnected) Color(0xFF22C55E).copy(alpha = 0.50f) else Color.White.copy(alpha = 0.15f),
+                                        RoundedCornerShape(50)
+                                    )
+                                    .padding(horizontal = 9.dp, vertical = 2.5.dp)
+                            ) {
                                 if (isConnected) {
                                     val pulseTransition = rememberInfiniteTransition(label = "pulse")
                                     val pulseAlpha by pulseTransition.animateFloat(
                                         initialValue = 1f,
-                                        targetValue = 0.4f,
+                                        targetValue = 0.35f,
                                         animationSpec = infiniteRepeatable(
                                             animation = tween(1000, easing = LinearEasing),
                                             repeatMode = RepeatMode.Reverse
@@ -3967,41 +4051,45 @@ private fun SettingsOverlay(
                                             .size(7.dp)
                                             .clip(CircleShape)
                                             .alpha(pulseAlpha)
-                                            .background(green)
+                                            .background(Color(0xFF22C55E))
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                 }
                                 Text(
                                     text = if (isConnected) "Connected" else "Disconnected",
-                                    fontSize = 12.sp,
-                                    color = if (isConnected) green else Color.White.copy(alpha = 0.6f),
-                                    lineHeight = 15.sp
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White,
+                                    lineHeight = 14.sp
                                 )
                             }
                         }
-                        // Device switcher buttons — glass style
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // Device switcher buttons — glass style, perfectly aligned below top row buttons
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(glassWhite)
-                                    .border(1.dp, glassBorder, RoundedCornerShape(10.dp))
+                                    .border(1.dp, glassBorder, RoundedCornerShape(12.dp))
                                     .clickable { onOpenDeviceManager() },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Filled.Computer, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.Computer, contentDescription = "Device manager", tint = Color.White, modifier = Modifier.size(18.dp))
                             }
                             Box(
                                 modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(glassWhite)
-                                    .border(1.dp, glassBorder, RoundedCornerShape(10.dp))
+                                    .border(1.dp, glassBorder, RoundedCornerShape(12.dp))
                                     .clickable { onNavigateToPairingGuide() },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Outlined.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Outlined.Add, contentDescription = "Add device", tint = Color.White, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
