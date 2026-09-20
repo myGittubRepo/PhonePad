@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,7 +43,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -124,6 +124,25 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Adjust
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.East
+import androidx.compose.material.icons.outlined.FlashOn
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Mail
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.OpenWith
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.outlined.WebAsset
+import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -148,6 +167,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.animation.core.EaseInOutCubic
@@ -184,6 +208,7 @@ class MainActivity : ComponentActivity() {
         private const val PREF_HAPTICS_ENABLED = "_haptics_enabled"
         private const val PREF_STATUS_BAR_AUTO_HIDE = "status_bar_auto_hide"
         private const val PREF_TRACKPAD_THEME = "trackpad_theme"
+        private const val PREF_UI_THEME = "ui_theme"
         private const val PREF_DEVICE_NICKNAME = "_nickname"
         private const val PREF_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
         private const val PREF_GESTURE_GUIDE_SECTIONS = "gesture_guide_sections"
@@ -293,15 +318,14 @@ class MainActivity : ComponentActivity() {
     private var hapticsEnabled by mutableStateOf(true)
     private var statusBarAutoHide by mutableStateOf(true)
     private var trackpadTheme by mutableStateOf("dark") // dark, darker, amoled
+    private var uiTheme by mutableStateOf("dark") // dark, light
 
     // Phase 1 UI navigation
     private var currentScreen by mutableStateOf(AppScreen.SPLASH)
 
     // Phase 2 trackpad surface state
     private var showGestureGuide by mutableStateOf(false)
-    private var gestureGuideSectionsExpanded by mutableStateOf(
-        mapOf("1-finger" to true, "2-finger" to true, "3-finger" to true, "4-finger" to true)
-    )
+    private var settingsInitialTab by mutableStateOf(0)
 
     // Phase 4 device manager
     private var showDeviceManager by mutableStateOf(false)
@@ -689,10 +713,10 @@ class MainActivity : ComponentActivity() {
         multiFingerTapMovementThresholdPx = MULTI_FINGER_TAP_MOVEMENT_DP * resources.displayMetrics.density
         palmTouchMajorThresholdPx = PALM_TOUCH_MAJOR_THRESHOLD_DP * resources.displayMetrics.density
         palmGraceMovementThresholdPx = PALM_GRACE_MOVEMENT_DP * resources.displayMetrics.density
-        loadGestureGuideSections()
         loadDeviceNicknames()
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
         trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "dark") ?: "dark"
+        uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -807,17 +831,11 @@ class MainActivity : ComponentActivity() {
                                 onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
                                 trackpadTheme = trackpadTheme,
                                 onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
+                                uiTheme = uiTheme,
+                                onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
                                 batteryPercent = getBatteryPercent(),
-                                showGestureGuide = showGestureGuide,
-                                onToggleGestureGuide = { showGestureGuide = !showGestureGuide },
-                                onDismissGestureGuide = { showGestureGuide = false },
-                                gestureGuideSections = gestureGuideSectionsExpanded,
-                                onToggleGestureSection = { section ->
-                                    gestureGuideSectionsExpanded = gestureGuideSectionsExpanded.toMutableMap().apply {
-                                        put(section, !(get(section) ?: true))
-                                    }
-                                    saveGestureGuideSections()
-                                },
+                                onToggleGestureGuide = { settingsInitialTab = 1; showSettings = true },
+                                settingsInitialTab = settingsInitialTab,
                                 showDeviceManager = showDeviceManager,
                                 onToggleDeviceManager = { showDeviceManager = !showDeviceManager },
                                 onDismissDeviceManager = { showDeviceManager = false },
@@ -1112,6 +1130,7 @@ class MainActivity : ComponentActivity() {
         hapticsEnabled = prefs.getBoolean(address + PREF_HAPTICS_ENABLED, true)
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
         trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "dark") ?: "dark"
+        uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
         loadDeviceNicknames()
         Log.d(TAG, "Loaded settings for $address: sensitivity=$sensitivityMultiplier, tapToClick=$tapToClickEnabled, naturalScroll=$naturalScrollEnabled, ripple=$rippleEnabled, haptics=$hapticsEnabled")
     }
@@ -1132,6 +1151,7 @@ class MainActivity : ComponentActivity() {
         prefs.edit()
             .putBoolean(PREF_STATUS_BAR_AUTO_HIDE, statusBarAutoHide)
             .putString(PREF_TRACKPAD_THEME, trackpadTheme)
+            .putString(PREF_UI_THEME, uiTheme)
             .apply()
     }
 
@@ -1191,20 +1211,6 @@ class MainActivity : ComponentActivity() {
         bondedDevices.addAll(adapter.bondedDevices.orEmpty())
     }
 
-    private fun saveGestureGuideSections() {
-        val encoded = gestureGuideSectionsExpanded.entries.joinToString(",") { "${it.key}=${it.value}" }
-        prefs.edit().putString(PREF_GESTURE_GUIDE_SECTIONS, encoded).apply()
-    }
-
-    private fun loadGestureGuideSections() {
-        val raw = prefs.getString(PREF_GESTURE_GUIDE_SECTIONS, null) ?: return
-        val map = mutableMapOf<String, Boolean>()
-        raw.split(",").forEach { entry ->
-            val parts = entry.split("=")
-            if (parts.size == 2) map[parts[0]] = parts[1].toBooleanStrictOrNull() ?: true
-        }
-        if (map.isNotEmpty()) gestureGuideSectionsExpanded = map
-    }
 
     private fun getBatteryPercent(): Int {
         val bm = getSystemService(BatteryManager::class.java) ?: return -1
@@ -3205,12 +3211,11 @@ fun TrackpadScreen(
     onStatusBarAutoHideChange: (Boolean) -> Unit,
     trackpadTheme: String,
     onTrackpadThemeChange: (String) -> Unit,
+    uiTheme: String,
+    onUiThemeChange: (String) -> Unit,
     batteryPercent: Int,
-    showGestureGuide: Boolean,
     onToggleGestureGuide: () -> Unit,
-    onDismissGestureGuide: () -> Unit,
-    gestureGuideSections: Map<String, Boolean>,
-    onToggleGestureSection: (String) -> Unit,
+    settingsInitialTab: Int,
     showDeviceManager: Boolean,
     onToggleDeviceManager: () -> Unit,
     onDismissDeviceManager: () -> Unit,
@@ -3315,24 +3320,18 @@ fun TrackpadScreen(
             .fillMaxSize()
             .background(darkSurface)
     ) {
-        // Ambient gradient — theme-aware
+        // Very subtle ambient gradient — theme-aware
         if (trackpadTheme != "amoled") {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cx = size.width / 2f
-                val cy = size.height * 0.4f
-                val glowRadius = size.minDimension * (0.55f + breathe * 0.1f)
+                val cy = size.height * 0.35f
+                val glowRadius = size.minDimension * 0.5f
                 drawCircle(
                     brush = Brush.radialGradient(
-                        listOf(accentGlow.copy(alpha = 0.025f + breathe * 0.01f), Color.Transparent),
+                        listOf(accentGlow.copy(alpha = 0.012f + breathe * 0.005f), Color.Transparent),
                         center = Offset(cx, cy), radius = glowRadius
                     ),
                     radius = glowRadius, center = Offset(cx, cy)
-                )
-                // Subtle edge vignette
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        listOf(edgeGlow, Color.Transparent, Color.Transparent, edgeGlow)
-                    )
                 )
             }
         }
@@ -3517,7 +3516,7 @@ fun TrackpadScreen(
         }
 
         // Gesture guide swipe-up affordance (bottom center)
-        if (!showGestureGuide) {
+        if (!showSettings) {
             val affordanceAlpha by infiniteTransition.animateFloat(
                 initialValue = 0.15f, targetValue = 0.35f,
                 animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
@@ -3554,7 +3553,7 @@ fun TrackpadScreen(
                 .align(Alignment.BottomCenter)
                 .pointerInput(Unit) {
                     detectVerticalDragGestures { _, dragAmount ->
-                        if (dragAmount < -10f && !showGestureGuide) {
+                        if (dragAmount < -10f && !showSettings) {
                             onToggleGestureGuide()
                         }
                     }
@@ -3581,8 +3580,10 @@ fun TrackpadScreen(
                 onHapticsChange = onHapticsChange,
                 statusBarAutoHide = statusBarAutoHide,
                 onStatusBarAutoHideChange = onStatusBarAutoHideChange,
-                trackpadTheme = trackpadTheme,
-                onTrackpadThemeChange = onTrackpadThemeChange,
+                uiTheme = uiTheme,
+                onUiThemeChange = onUiThemeChange,
+                settingsInitialTab = settingsInitialTab,
+                connectedHostName = connectedHostName,
                 bondedDevices = bondedDevices,
                 isConnected = isConnected,
                 connectedDeviceAddress = bondedDevices.firstOrNull { (deviceNicknames[it.address] ?: it.name) == connectedHostName }?.address,
@@ -3661,18 +3662,6 @@ fun TrackpadScreen(
             )
         }
 
-        // Gesture Guide bottom sheet
-        AnimatedVisibility(
-            visible = showGestureGuide,
-            enter = slideInVertically { it } + fadeIn(tween(200)),
-            exit = slideOutVertically { it } + fadeOut(tween(200))
-        ) {
-            GestureGuideSheet(
-                sections = gestureGuideSections,
-                onToggleSection = onToggleGestureSection,
-                onDismiss = onDismissGestureGuide
-            )
-        }
     }
 }
 
@@ -3738,7 +3727,7 @@ private fun ConnectionStatusPill(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Phase 4 — Settings Screen (4 groups)
+// Phase 4 — Settings Bottom Sheet (3 tabs: Controls, Gestures, More)
 // ──────────────────────────────────────────────────────────────────────────────
 
 @SuppressLint("MissingPermission")
@@ -3757,8 +3746,10 @@ private fun SettingsOverlay(
     onHapticsChange: (Boolean) -> Unit,
     statusBarAutoHide: Boolean,
     onStatusBarAutoHideChange: (Boolean) -> Unit,
-    trackpadTheme: String,
-    onTrackpadThemeChange: (String) -> Unit,
+    uiTheme: String,
+    onUiThemeChange: (String) -> Unit,
+    settingsInitialTab: Int,
+    connectedHostName: String?,
     bondedDevices: List<BluetoothDevice>,
     isConnected: Boolean,
     connectedDeviceAddress: String?,
@@ -3768,238 +3759,1196 @@ private fun SettingsOverlay(
     appVersion: String
 ) {
     val context = LocalContext.current
+    val isDark = uiTheme == "dark"
+
+    // Theme colors
+    val bg = if (isDark) Color(0xFF08080D) else Color(0xFFF2F2F7)
+    val surface0 = if (isDark) Color(0xFF0F0F16) else Color(0xFFE8E8EE)
+    val surface1 = if (isDark) Color(0xFF14141E) else Color.White
+    val surface2 = if (isDark) Color(0xFF1B1B28) else Color(0xFFF5F5FA)
+    val accent = Color(0xFF7C6AF6)
+    val accentLight = Color(0xFF9D8DF7)
+    val accentSoft = if (isDark) Color(0xFF7C6AF6).copy(alpha = 0.08f) else Color(0xFF7C6AF6).copy(alpha = 0.06f)
+    val green = Color(0xFF3DDC84)
+    val pink = Color(0xFFF472B6)
+    val blue = Color(0xFF60A5FA)
+    val text1 = if (isDark) Color(0xFFEEEEF2) else Color(0xFF1A1A2E)
+    val text2 = if (isDark) Color(0xFF9494AC) else Color(0xFF6B6B88)
+    val text3 = if (isDark) Color(0xFF5C5C74) else Color(0xFF9898AE)
+    val border = if (isDark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.06f)
+    val toggleOff = if (isDark) Color(0xFF2A2A3A) else Color(0xFFCDCDD8)
+    val success = Color(0xFF3DDC84)
+    val successSoft = Color(0xFF3DDC84).copy(alpha = 0.10f)
+    val trackBg = if (isDark) Color(0xFF2A2A3A) else Color(0xFFD8D8E4)
+    val thumbSh = if (isDark) Color(0x80000000) else Color(0x1F000000)
+    val accentGlow = accent.copy(alpha = if (isDark) 0.25f else 0.12f)
+    val devBg = if (isDark) Color(0xFF1B1B28) else Color(0xFFF0F0F6)
+    val devConn = Color(0xFF3DDC84).copy(alpha = 0.08f)
+    val tabBg = if (isDark) Color(0xFF1B1B28) else Color.White
+    val dashedColor = accent.copy(alpha = if (isDark) 0.25f else 0.35f)
+
+    val cardShape = RoundedCornerShape(16.dp)
+    val sheetShape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+
+    var selectedTab by remember { mutableStateOf(settingsInitialTab.coerceIn(0, 2)) }
+
+    // Slide-up animation
+    val slideAnim = remember { Animatable(1f) }
+    val scrimAlpha = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        launch { scrimAlpha.animateTo(1f, tween(300)) }
+        launch { slideAnim.animateTo(0f, tween(400, easing = EaseOutCubic)) }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xF0121218))
-            .clickable(enabled = false) {}
+            .background(Color.Black.copy(alpha = 0.5f * scrimAlpha.value))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.BottomCenter
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-                .verticalScroll(rememberScrollState())
+                .fillMaxWidth()
+                .fillMaxHeight(0.82f)
+                .offset(y = (slideAnim.value * 600).dp)
+                .background(bg, sheetShape)
+                .border(0.5.dp, border, sheetShape)
+                .clickable(enabled = false) {}
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // ── Gradient Header (logo + device banner) ──
+            val glassWhite = Color.White.copy(alpha = 0.18f)
+            val glassBorder = Color.White.copy(alpha = 0.25f)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 20.dp, bottomEnd = 20.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFF6C5CE7), Color(0xFF9D8DF7), Color(0xFFB8A9FB)),
+                            start = Offset(0f, 0f),
+                            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+                        )
+                    )
             ) {
-                Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+                // Decorative concentric circles
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    val cx = size.width * 0.62f
+                    val cy = size.height * 0.38f
+                    val ringColor = Color.White.copy(alpha = 0.06f)
+                    for (r in listOf(100.dp.toPx(), 70.dp.toPx(), 40.dp.toPx())) {
+                        drawCircle(
+                            color = ringColor,
+                            radius = r,
+                            center = Offset(cx, cy),
+                            style = Stroke(1.2.dp.toPx())
+                        )
+                    }
+                    // Small accent dot
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.35f),
+                        radius = 3.dp.toPx(),
+                        center = Offset(cx, cy)
+                    )
                 }
-            }
 
-            // ── Group 1: Trackpad Feel ──
-            Spacer(modifier = Modifier.height(28.dp))
-            SettingsGroupHeader("Trackpad Feel")
-
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("Sensitivity", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("Slow", fontSize = 11.sp, color = Color.White.copy(alpha = 0.4f))
-                Slider(
-                    value = sensitivity,
-                    onValueChange = onSensitivityChange,
-                    valueRange = 0.3f..2.0f,
-                    modifier = Modifier.weight(1f)
-                )
-                Text("Fast", fontSize = 11.sp, color = Color.White.copy(alpha = 0.4f))
-            }
-            val sensitivityLabel = when {
-                sensitivity <= 0.6f -> "Slow and precise"
-                sensitivity <= 1.0f -> "Balanced"
-                sensitivity <= 1.5f -> "Quick"
-                else -> "Fast and loose"
-            }
-            Text(
-                text = "${"%.1f".format(sensitivity)}x · $sensitivityLabel",
-                fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.4f),
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-            SettingsToggleRow("Tap to Click", tapToClick, onTapToClickChange)
-            Spacer(modifier = Modifier.height(8.dp))
-            SettingsToggleRow("Natural Scroll", naturalScroll, onNaturalScrollChange)
-            Text(
-                text = if (naturalScroll) "Content follows finger direction" else "Traditional scroll direction",
-                fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.35f),
-                modifier = Modifier.padding(start = 0.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            SettingsToggleRow("Touch Feedback", hapticsEnabled, onHapticsChange)
-
-            // ── Group 2: Devices ──
-            Spacer(modifier = Modifier.height(28.dp))
-            SettingsGroupHeader("Devices")
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (bondedDevices.isEmpty()) {
-                Text("No paired devices", fontSize = 13.sp, color = Color.White.copy(alpha = 0.4f))
-            } else {
-                bondedDevices.forEach { device ->
-                    val nickname = deviceNicknames[device.address]
-                    val displayName = nickname ?: device.name ?: device.address
-                    val isThisConnected = device.address == connectedDeviceAddress
+                Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 16.dp)) {
+                    // Top row: app icon + name, theme + close
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenDeviceManager() }
-                            .padding(vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // App icon — white frosted square
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White.copy(alpha = 0.22f))
+                                    .border(1.dp, glassBorder, RoundedCornerShape(12.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.TouchApp,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                "PhonePad",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Theme toggle — glass circle
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(glassWhite)
+                                    .border(1.dp, glassBorder, CircleShape)
+                                    .clickable { onUiThemeChange(if (isDark) "light" else "dark") },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
+                                    contentDescription = "Toggle theme",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            // Close — glass circle
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(glassWhite)
+                                    .border(1.dp, glassBorder, CircleShape)
+                                    .clickable { onDismiss() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Device banner row inside gradient
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Device icon — frosted rounded square
                         Box(
                             modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (isThisConnected) Color(0xFF0D9488) else Color(0xFF555555))
-                        )
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.18f))
+                                .border(1.dp, glassBorder, RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Computer,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(displayName, fontSize = 14.sp, color = Color.White)
-                            if (nickname != null) {
+                            Text(
+                                text = connectedHostName ?: "No device",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                lineHeight = 18.sp
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isConnected) {
+                                    val pulseTransition = rememberInfiniteTransition(label = "pulse")
+                                    val pulseAlpha by pulseTransition.animateFloat(
+                                        initialValue = 1f,
+                                        targetValue = 0.4f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(1000, easing = LinearEasing),
+                                            repeatMode = RepeatMode.Reverse
+                                        ),
+                                        label = "pulseAlpha"
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .alpha(pulseAlpha)
+                                            .background(green)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
                                 Text(
-                                    device.name ?: device.address,
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.35f)
+                                    text = if (isConnected) "Connected" else "Disconnected",
+                                    fontSize = 12.sp,
+                                    color = if (isConnected) green else Color.White.copy(alpha = 0.6f),
+                                    lineHeight = 15.sp
                                 )
                             }
                         }
-                        Text(
-                            text = if (isThisConnected) "Connected" else "",
-                            fontSize = 11.sp,
-                            color = Color(0xFF0D9488)
-                        )
+                        // Device switcher buttons — glass style
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(glassWhite)
+                                    .border(1.dp, glassBorder, RoundedCornerShape(10.dp))
+                                    .clickable { onOpenDeviceManager() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Computer, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(glassWhite)
+                                    .border(1.dp, glassBorder, RoundedCornerShape(10.dp))
+                                    .clickable { onNavigateToPairingGuide() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Outlined.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            TextButton(onClick = onNavigateToPairingGuide) {
-                Text("+ Add new device", color = Color(0xFF7B7FD4), fontSize = 13.sp)
-            }
-            TextButton(onClick = onOpenDeviceManager) {
-                Text("Manage devices", color = Color(0xFF7B7FD4), fontSize = 13.sp)
-            }
-
-            // ── Group 3: Display ──
-            Spacer(modifier = Modifier.height(28.dp))
-            SettingsGroupHeader("Display")
             Spacer(modifier = Modifier.height(12.dp))
 
-            Text("Trackpad Theme", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(
-                    Triple("dark", "Dark", Color(0xFF111118)),
-                    Triple("darker", "Darker", Color(0xFF050508)),
-                    Triple("amoled", "AMOLED", Color.Black)
-                ).forEach { (key, label, bg) ->
-                    val selected = trackpadTheme == key
-                    val accentDot = when (key) {
-                        "dark" -> Color(0xFF4B4FCF)
-                        "darker" -> Color(0xFF3B3F9E)
-                        else -> Color.Transparent
-                    }
+            // ── Tab Bar ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(surface0)
+                    .border(0.5.dp, border, RoundedCornerShape(16.dp))
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                val tabLabels = listOf("Controls", "Gestures", "More")
+                tabLabels.forEachIndexed { index, label ->
+                    val isSelected = selectedTab == index
+                    val tabTextColor by animateColorAsState(
+                        targetValue = if (isSelected) text1 else text3,
+                        animationSpec = tween(250),
+                        label = "tabText$index"
+                    )
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(bg)
-                            .border(
-                                width = if (selected) 2.dp else 1.dp,
-                                color = if (selected) Color(0xFF7B7FD4) else Color.White.copy(alpha = 0.08f),
-                                shape = RoundedCornerShape(10.dp)
+                            .then(
+                                if (isSelected) Modifier
+                                    .shadow(3.dp, RoundedCornerShape(13.dp))
+                                    .clip(RoundedCornerShape(13.dp))
+                                    .background(surface1)
+                                    .border(0.5.dp, border, RoundedCornerShape(13.dp))
+                                else Modifier
+                                    .clip(RoundedCornerShape(13.dp))
+                                    .background(Color.Transparent)
                             )
-                            .clickable { onTrackpadThemeChange(key) },
+                            .clickable { selectedTab = index }
+                            .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            if (accentDot != Color.Transparent) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(accentDot.copy(alpha = 0.6f))
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                            }
-                            Text(
-                                label, fontSize = 11.sp,
-                                color = Color.White.copy(alpha = if (selected) 1f else 0.45f),
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                            )
-                        }
+                        Text(
+                            text = label,
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = tabTextColor
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-            SettingsToggleRow("Touch Ripple", rippleEnabled, onRippleChange)
-            Spacer(modifier = Modifier.height(8.dp))
-            SettingsToggleRow("Auto-hide Status Bar", statusBarAutoHide, onStatusBarAutoHideChange)
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // ── Group 4: About ──
-            Spacer(modifier = Modifier.height(28.dp))
-            SettingsGroupHeader("About")
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+            // ── Tab Content ──
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
             ) {
-                Text("Version", fontSize = 13.sp, color = Color.White.copy(alpha = 0.6f))
-                Text(appVersion, fontSize = 13.sp, color = Color.White.copy(alpha = 0.4f))
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-            TextButton(onClick = {
-                val intent = Intent(Intent.ACTION_SENDTO).apply {
-                    data = Uri.parse("mailto:iammd.uzair@gmail.com")
-                    putExtra(Intent.EXTRA_SUBJECT, "PhonePad Feedback")
+                when (selectedTab) {
+                    0 -> SettingsControlsTab(
+                        sensitivity = sensitivity,
+                        onSensitivityChange = onSensitivityChange,
+                        tapToClick = tapToClick,
+                        onTapToClickChange = onTapToClickChange,
+                        naturalScroll = naturalScroll,
+                        onNaturalScrollChange = onNaturalScrollChange,
+                        hapticsEnabled = hapticsEnabled,
+                        onHapticsChange = onHapticsChange,
+                        rippleEnabled = rippleEnabled,
+                        onRippleChange = onRippleChange,
+                        statusBarAutoHide = statusBarAutoHide,
+                        onStatusBarAutoHideChange = onStatusBarAutoHideChange,
+                        isDark = isDark,
+                        surface1 = surface1,
+                        accent = accent,
+                        accentLight = accentLight,
+                        green = green,
+                        pink = pink,
+                        blue = blue,
+                        text1 = text1,
+                        text2 = text2,
+                        text3 = text3,
+                        border = border,
+                        toggleOff = toggleOff,
+                        trackBg = trackBg,
+                        thumbSh = thumbSh,
+                        accentGlow = accentGlow
+                    )
+                    1 -> SettingsGesturesTab(
+                        isDark = isDark,
+                        surface1 = surface1,
+                        accent = accent,
+                        accentSoft = accentSoft,
+                        text1 = text1,
+                        text2 = text2,
+                        text3 = text3,
+                        border = border
+                    )
+                    2 -> SettingsMoreTab(
+                        bondedDevices = bondedDevices,
+                        isConnected = isConnected,
+                        connectedDeviceAddress = connectedDeviceAddress,
+                        deviceNicknames = deviceNicknames,
+                        onOpenDeviceManager = onOpenDeviceManager,
+                        onNavigateToPairingGuide = onNavigateToPairingGuide,
+                        appVersion = appVersion,
+                        isDark = isDark,
+                        surface1 = surface1,
+                        accent = accent,
+                        accentLight = accentLight,
+                        green = green,
+                        text1 = text1,
+                        text2 = text2,
+                        text3 = text3,
+                        border = border,
+                        success = success,
+                        successSoft = successSoft,
+                        devBg = devBg,
+                        devConn = devConn,
+                        dashedColor = dashedColor
+                    )
                 }
-                try { context.startActivity(intent) } catch (_: Exception) {}
-            }) {
-                Text("Send Feedback", color = Color(0xFF7B7FD4), fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(24.dp))
             }
-
-            Spacer(modifier = Modifier.height(40.dp))
         }
     }
 }
 
+// ── Controls Tab ──
+
 @Composable
-private fun SettingsGroupHeader(title: String) {
-    Column {
-        Text(
-            text = title,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF7B7FD4),
-            letterSpacing = 1.sp
-        )
+private fun SettingsControlsTab(
+    sensitivity: Float,
+    onSensitivityChange: (Float) -> Unit,
+    tapToClick: Boolean,
+    onTapToClickChange: (Boolean) -> Unit,
+    naturalScroll: Boolean,
+    onNaturalScrollChange: (Boolean) -> Unit,
+    hapticsEnabled: Boolean,
+    onHapticsChange: (Boolean) -> Unit,
+    rippleEnabled: Boolean,
+    onRippleChange: (Boolean) -> Unit,
+    statusBarAutoHide: Boolean,
+    onStatusBarAutoHideChange: (Boolean) -> Unit,
+    isDark: Boolean,
+    surface1: Color,
+    accent: Color,
+    accentLight: Color,
+    green: Color,
+    pink: Color,
+    blue: Color,
+    text1: Color,
+    text2: Color,
+    text3: Color,
+    border: Color,
+    toggleOff: Color,
+    trackBg: Color,
+    thumbSh: Color,
+    accentGlow: Color
+) {
+    val cardShape = RoundedCornerShape(16.dp)
+
+    // ── Cursor Speed ──
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(surface1)
+            .border(0.5.dp, border, cardShape)
+            .padding(16.dp)
+    ) {
+        // Header: "Cursor speed" + badge
+        val speedLabel = when {
+            sensitivity <= 0.7f -> "Precise"
+            sensitivity <= 1.4f -> "Balanced"
+            else -> "Fast"
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Cursor speed",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = text1
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(accent.copy(alpha = 0.10f))
+                    .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 5.dp)
+            ) {
+                Text(
+                    speedLabel,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = accent
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Large value display
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                "${"%.1f".format(sensitivity)}",
+                fontSize = 38.sp,
+                fontWeight = FontWeight.Bold,
+                color = text1,
+                lineHeight = 38.sp
+            )
+            Text(
+                "×",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Medium,
+                color = text3,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Custom slider
+        var sliderFraction by remember { mutableStateOf((sensitivity - 0.3f) / 1.7f) }
+        LaunchedEffect(sensitivity) { sliderFraction = ((sensitivity - 0.3f) / 1.7f).coerceIn(0f, 1f) }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val w = size.width.toFloat()
+                        fun update(x: Float) {
+                            val f = (x / w).coerceIn(0f, 1f)
+                            sliderFraction = f
+                            onSensitivityChange(0.3f + f * 1.7f)
+                        }
+                        update(down.position.x)
+                        down.consume()
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.all { !it.pressed }) break
+                            event.changes.forEach {
+                                update(it.position.x)
+                                it.consume()
+                            }
+                        }
+                    }
+                }
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val trackH = 8.dp.toPx()
+                val trackY = (size.height - trackH) / 2
+                val thumbR = 12.dp.toPx()
+                val thumbX = thumbR + sliderFraction * (size.width - 2 * thumbR)
+
+                // Track background
+                drawRoundRect(
+                    color = trackBg,
+                    topLeft = Offset(0f, trackY),
+                    size = Size(size.width, trackH),
+                    cornerRadius = CornerRadius(trackH / 2)
+                )
+
+                // Fill gradient
+                if (thumbX > 0f) {
+                    drawRoundRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(accent, accentLight),
+                            startX = 0f,
+                            endX = thumbX
+                        ),
+                        topLeft = Offset(0f, trackY),
+                        size = Size(thumbX, trackH),
+                        cornerRadius = CornerRadius(trackH / 2)
+                    )
+                }
+
+                // Thumb glow ring
+                drawCircle(
+                    color = accentGlow,
+                    radius = thumbR + 4.dp.toPx(),
+                    center = Offset(thumbX, size.height / 2)
+                )
+
+                // Thumb shadow
+                drawCircle(
+                    color = thumbSh,
+                    radius = thumbR,
+                    center = Offset(thumbX, size.height / 2 + 1.5.dp.toPx())
+                )
+
+                // Thumb white fill
+                drawCircle(
+                    color = Color.White,
+                    radius = thumbR,
+                    center = Offset(thumbX, size.height / 2)
+                )
+
+                // Thumb inner accent dot
+                drawCircle(
+                    color = accent,
+                    radius = 4.dp.toPx(),
+                    center = Offset(thumbX, size.height / 2)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Tick marks
+        val tickCount = 10
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+        ) {
+            val thumbR = 12.dp.toPx()
+            val usableW = size.width - 2 * thumbR
+            for (i in 0..tickCount) {
+                val x = thumbR + (usableW * i / tickCount)
+                val tickH = 5.dp.toPx()
+                val tickW = 2.dp.toPx()
+                val isFilled = (i.toFloat() / tickCount) <= sliderFraction
+                drawRoundRect(
+                    color = if (isFilled) accent else trackBg,
+                    topLeft = Offset(x - tickW / 2, 0f),
+                    size = Size(tickW, tickH),
+                    cornerRadius = CornerRadius(1.dp.toPx())
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(4.dp))
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Precise", fontSize = 11.sp, color = text3)
+            Text("Balanced", fontSize = 11.sp, color = text3)
+            Text("Fast", fontSize = 11.sp, color = text3)
+        }
+    }
+
+    Spacer(modifier = Modifier.height(20.dp))
+
+    // ── Behavior ──
+    Text(
+        "BEHAVIOR",
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = text3,
+        letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(surface1)
+            .border(0.5.dp, border, cardShape)
+    ) {
+        SettingsToggleRow(
+            title = "Tap to click",
+            description = "Tap anywhere to left-click",
+            icon = Icons.Outlined.TouchApp,
+            iconColor = accentLight,
+            iconBgColor = accent.copy(alpha = 0.12f),
+            checked = tapToClick,
+            onCheckedChange = onTapToClickChange,
+            text1 = text1,
+            text3 = text3,
+            accent = accent,
+            toggleOff = toggleOff,
+            border = border
+        )
+        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
+        SettingsToggleRow(
+            title = "Natural scroll",
+            description = "Content follows finger direction",
+            icon = Icons.Outlined.KeyboardArrowDown,
+            iconColor = green,
+            iconBgColor = green.copy(alpha = 0.10f),
+            checked = naturalScroll,
+            onCheckedChange = onNaturalScrollChange,
+            text1 = text1,
+            text3 = text3,
+            accent = accent,
+            toggleOff = toggleOff,
+            border = border
+        )
+        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
+        SettingsToggleRow(
+            title = "Haptic feedback",
+            description = "Vibrate on tap and gesture",
+            icon = Icons.Outlined.FlashOn,
+            iconColor = pink,
+            iconBgColor = pink.copy(alpha = 0.10f),
+            checked = hapticsEnabled,
+            onCheckedChange = onHapticsChange,
+            text1 = text1,
+            text3 = text3,
+            accent = accent,
+            toggleOff = toggleOff,
+            border = border
+        )
+    }
+
+    Spacer(modifier = Modifier.height(20.dp))
+
+    // ── Display ──
+    Text(
+        "DISPLAY",
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = text3,
+        letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(surface1)
+            .border(0.5.dp, border, cardShape)
+    ) {
+        SettingsToggleRow(
+            title = "Touch ripple",
+            description = "Show ripple on touch",
+            icon = Icons.Outlined.Adjust,
+            iconColor = blue,
+            iconBgColor = blue.copy(alpha = 0.10f),
+            checked = rippleEnabled,
+            onCheckedChange = onRippleChange,
+            text1 = text1,
+            text3 = text3,
+            accent = accent,
+            toggleOff = toggleOff,
+            border = border
+        )
+        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
+        SettingsToggleRow(
+            title = "Auto-hide status bar",
+            description = "Fades after 3 seconds",
+            icon = Icons.Outlined.WebAsset,
+            iconColor = accentLight,
+            iconBgColor = accent.copy(alpha = 0.12f),
+            checked = statusBarAutoHide,
+            onCheckedChange = onStatusBarAutoHideChange,
+            text1 = text1,
+            text3 = text3,
+            accent = accent,
+            toggleOff = toggleOff,
+            border = border
+        )
     }
 }
 
 @Composable
-private fun SettingsToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SettingsToggleRow(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    iconColor: Color,
+    iconBgColor: Color,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    text1: Color,
+    text3: Color,
+    accent: Color,
+    toggleOff: Color,
+    border: Color
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, fontSize = 14.sp, color = Color.White)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        // Icon box
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(iconBgColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconColor,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = text1,
+                lineHeight = 18.sp
+            )
+            Text(
+                description,
+                fontSize = 11.sp,
+                color = text3,
+                lineHeight = 14.sp,
+                maxLines = 1
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        // Custom toggle - 46x28, rounded 14, thumb 22dp
+        val toggleBg by animateColorAsState(
+            targetValue = if (checked) accent else toggleOff,
+            animationSpec = tween(200),
+            label = "toggleBg"
+        )
+        val thumbOffset by animateFloatAsState(
+            targetValue = if (checked) 1f else 0f,
+            animationSpec = tween(200),
+            label = "thumbOffset"
+        )
+        Box(
+            modifier = Modifier
+                .width(46.dp)
+                .height(28.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(toggleBg)
+                .clickable { onCheckedChange(!checked) }
+                .padding(3.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .offset(x = (18 * thumbOffset).dp)
+                    .shadow(4.dp, CircleShape)
+                    .clip(CircleShape)
+                    .background(Color.White)
+            )
+        }
+    }
+}
+
+// ── Gestures Tab ──
+
+@Composable
+private fun SettingsGesturesTab(
+    isDark: Boolean,
+    surface1: Color,
+    accent: Color,
+    accentSoft: Color,
+    text1: Color,
+    text2: Color,
+    text3: Color,
+    border: Color
+) {
+    val cardShape = RoundedCornerShape(16.dp)
+
+    gestureData.forEach { (sectionKey, entries) ->
+        val fingerCount = sectionKey.first().digitToIntOrNull() ?: 1
+        val sectionLabel = when (fingerCount) {
+            1 -> "One finger"
+            2 -> "Two fingers"
+            3 -> "Three fingers"
+            4 -> "Four fingers"
+            else -> "$fingerCount fingers"
+        }
+
+        // Section header with finger dots
+        Row(
+            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp, start = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                repeat(fingerCount) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(accent)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = sectionLabel,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = text2,
+                letterSpacing = 0.3.sp
+            )
+        }
+
+        if (fingerCount == 3 && entries.isEmpty()) {
+            // "No gestures assigned" placeholder
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(cardShape)
+                    .background(surface1)
+                    .border(0.5.dp, border, cardShape)
+                    .padding(vertical = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("No gestures assigned", fontSize = 13.sp, color = text3)
+            }
+        } else {
+            // 2-column grid of gesture cards
+            val chunked = entries.chunked(2)
+            chunked.forEach { rowEntries ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    rowEntries.forEach { entry ->
+                        val isWide = entry.gesture.contains("hold")
+                        Box(
+                            modifier = Modifier
+                                .then(if (isWide && rowEntries.size == 1) Modifier.fillMaxWidth() else Modifier.weight(1f))
+                                .padding(bottom = 8.dp)
+                                .clip(cardShape)
+                                .background(surface1)
+                                .border(0.5.dp, border, cardShape)
+                                .padding(12.dp)
+                        ) {
+                            if (isWide) {
+                                // Wide card: row layout (icon left, text right)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(46.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(accentSoft),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = gestureIcon(entry.gesture, entry.action),
+                                            contentDescription = null,
+                                            tint = accent,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            text = entry.gesture,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = text1,
+                                            lineHeight = 17.sp
+                                        )
+                                        Text(
+                                            text = entry.action,
+                                            fontSize = 11.sp,
+                                            color = text3,
+                                            lineHeight = 14.sp
+                                        )
+                                    }
+                                }
+                            } else {
+                                // Normal card: column layout
+                                Column {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(accentSoft),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = gestureIcon(entry.gesture, entry.action),
+                                            contentDescription = null,
+                                            tint = accent,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = entry.gesture,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = text1
+                                    )
+                                    Text(
+                                        text = entry.action,
+                                        fontSize = 11.sp,
+                                        color = text3
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // Fill empty space if odd number
+                    if (rowEntries.size == 1 && !rowEntries[0].gesture.contains("hold")) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── More Tab ──
+
+@SuppressLint("MissingPermission")
+@Composable
+private fun SettingsMoreTab(
+    bondedDevices: List<BluetoothDevice>,
+    isConnected: Boolean,
+    connectedDeviceAddress: String?,
+    deviceNicknames: Map<String, String>,
+    onOpenDeviceManager: () -> Unit,
+    onNavigateToPairingGuide: () -> Unit,
+    appVersion: String,
+    isDark: Boolean,
+    surface1: Color,
+    accent: Color,
+    accentLight: Color,
+    green: Color,
+    text1: Color,
+    text2: Color,
+    text3: Color,
+    border: Color,
+    success: Color,
+    successSoft: Color,
+    devBg: Color,
+    devConn: Color,
+    dashedColor: Color
+) {
+    val context = LocalContext.current
+    val cardShape = RoundedCornerShape(16.dp)
+
+    // ── Devices section ──
+    Text(
+        "DEVICES",
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = text3,
+        letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(surface1)
+            .border(0.5.dp, border, cardShape)
+    ) {
+        if (bondedDevices.isEmpty()) {
+            Text(
+                "No paired devices",
+                fontSize = 13.sp,
+                color = text2,
+                modifier = Modifier.padding(16.dp)
+            )
+        } else {
+            bondedDevices.take(3).forEachIndexed { index, device ->
+                val nickname = deviceNicknames[device.address]
+                val displayName = nickname ?: device.name ?: device.address
+                val isThisConnected = device.address == connectedDeviceAddress
+                if (index > 0) Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (isThisConnected) Modifier.background(devConn) else Modifier)
+                        .clickable { onOpenDeviceManager() }
+                        .padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Device icon
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isThisConnected) successSoft else devBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Computer,
+                            contentDescription = null,
+                            tint = if (isThisConnected) success else text3,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            displayName,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = text1,
+                            lineHeight = 18.sp
+                        )
+                        Text(
+                            if (isThisConnected) "Connected" else "Paired",
+                            fontSize = 12.sp,
+                            color = if (isThisConnected) success else text3,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    // Chevron
+                    Icon(
+                        imageVector = Icons.Outlined.ChevronRight,
+                        contentDescription = null,
+                        tint = text3,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    // Add new device button - OUTSIDE the card, dashed border
+    Spacer(modifier = Modifier.height(10.dp))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .drawBehind {
+                drawRoundRect(
+                    color = dashedColor,
+                    cornerRadius = CornerRadius(16.dp.toPx()),
+                    style = Stroke(
+                        width = 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 4.dp.toPx()))
+                    )
+                )
+            }
+            .clickable { onNavigateToPairingGuide() }
+            .padding(14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Add,
+                contentDescription = null,
+                tint = accentLight,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Add new device",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = accentLight
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(20.dp))
+
+    // ── About section ──
+    Text(
+        "ABOUT",
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = text3,
+        letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(surface1)
+            .border(0.5.dp, border, cardShape)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Version", fontSize = 14.sp, color = text2)
+            Text(appVersion, fontSize = 14.sp, color = text3)
+        }
+
+        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
+
+        // Send feedback link row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:iammd.uzair@gmail.com")
+                        putExtra(Intent.EXTRA_SUBJECT, "PhonePad Feedback")
+                    }
+                    try { context.startActivity(intent) } catch (_: Exception) {}
+                }
+                .padding(horizontal = 15.dp, vertical = 20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Send feedback", color = accentLight, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Icon(
+                imageVector = Icons.Outlined.ChevronRight,
+                contentDescription = null,
+                tint = text3,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+
+        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
+
+        // Rate PhonePad link row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${context.packageName}"))
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}"))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                }
+                .padding(horizontal = 15.dp, vertical = 20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Rate PhonePad", color = accentLight, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Icon(
+                imageVector = Icons.Outlined.ChevronRight,
+                contentDescription = null,
+                tint = text3,
+                modifier = Modifier.size(16.dp)
+            )
+        }
     }
 }
 
@@ -4458,178 +5407,44 @@ private val gestureData = mapOf(
         GestureEntry("Tap + hold + drag", "Click and drag", "press_trail"),
     ),
     "2-finger" to listOf(
-        GestureEntry("Drag vertical", "Scroll up/down", "two_dots_vertical"),
-        GestureEntry("Drag horizontal", "Scroll left/right", "two_dots_horizontal"),
+        GestureEntry("Drag vertical", "Scroll up / down", "two_dots_vertical"),
+        GestureEntry("Drag horizontal", "Scroll left / right", "two_dots_horizontal"),
         GestureEntry("Tap", "Right click", "two_dots_tap"),
-        GestureEntry("Pinch in/out", "Zoom", "pinch"),
+        GestureEntry("Pinch", "Zoom in / out", "pinch"),
     ),
     "3-finger" to listOf(
         GestureEntry("Tap", "Middle click", "three_dots_tap"),
         GestureEntry("Swipe up", "Task View", "three_dots_up"),
         GestureEntry("Swipe down", "Show Desktop", "three_dots_down"),
-        GestureEntry("Swipe left/right", "Switch apps", "three_dots_side"),
+        GestureEntry("Swipe left / right", "Switch apps", "three_dots_side"),
     ),
     "4-finger" to listOf(
-        GestureEntry("Tap", "Notification Center", "four_dots_tap"),
-        GestureEntry("Swipe left/right", "Switch virtual desktop", "four_dots_side"),
+        GestureEntry("Tap", "Notifications", "four_dots_tap"),
         GestureEntry("Swipe up", "Task View", "four_dots_up"),
         GestureEntry("Swipe down", "Show Desktop", "four_dots_down"),
+        GestureEntry("Swipe left / right", "Switch desktop", "four_dots_side"),
     )
 )
 
-@Composable
-private fun GestureGuideSheet(
-    sections: Map<String, Boolean>,
-    onToggleSection: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clickable { onDismiss() }
-    ) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .fillMaxSize(0.55f)
-                .background(
-                    Color(0xFF1C1C24),
-                    RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
-                )
-                .clickable(enabled = false) {}
-        ) {
-            // Drag handle
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(40.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White.copy(alpha = 0.3f))
-                )
-            }
 
-            // Title
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Gestures",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = "Close",
-                        tint = Color.White.copy(alpha = 0.6f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            // Gesture list
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 16.dp)
-            ) {
-                gestureData.forEach { (sectionKey, entries) ->
-                    val isExpanded = sections[sectionKey] ?: true
-                    val sectionLabel = sectionKey.replaceFirstChar { it.uppercase() } + " gestures"
-
-                    item(key = "header_$sectionKey") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onToggleSection(sectionKey) }
-                                .padding(vertical = 10.dp, horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = sectionLabel,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF7B7FD4)
-                            )
-                            Icon(
-                                imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.5f),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    if (isExpanded) {
-                        items(entries, key = { "${sectionKey}_${it.gesture}" }) { entry ->
-                            GestureEntryRow(
-                                entry = entry,
-                                dotCount = sectionKey.first().digitToIntOrNull() ?: 1
-                            )
-                        }
-                    }
-
-                    item(key = "divider_$sectionKey") {
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.06f),
-                            modifier = Modifier.padding(vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
+private fun gestureIcon(name: String, action: String = ""): ImageVector = when {
+    name == "Drag" -> Icons.Outlined.East
+    name == "Tap" && action.contains("Notif", ignoreCase = true) -> Icons.Outlined.Notifications
+    name == "Tap" -> Icons.Outlined.Adjust
+    name.contains("hold") -> Icons.Outlined.OpenWith
+    name == "Drag vertical" -> Icons.Outlined.SwapVert
+    name == "Drag horizontal" -> Icons.Outlined.SwapHoriz
+    name.contains("Pinch") -> Icons.Outlined.ZoomIn
+    name == "Swipe up" -> Icons.Outlined.ArrowUpward
+    name == "Swipe down" -> Icons.Outlined.ArrowDownward
+    name.contains("Swipe left") -> Icons.Outlined.SwapHoriz
+    else -> Icons.Outlined.TouchApp
 }
 
 @Composable
-private fun GestureEntryRow(entry: GestureEntry, dotCount: Int) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Illustration: stylized finger dots on a rounded surface
-        GestureIllustration(
-            type = entry.illustrationType,
-            dotCount = dotCount,
-            modifier = Modifier.size(48.dp)
-        )
-        Spacer(modifier = Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = entry.gesture,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color.White
-            )
-            Text(
-                text = entry.action,
-                fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.5f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun GestureIllustration(type: String, dotCount: Int, modifier: Modifier = Modifier) {
-    val teal = Color(0xFF2DD4BF)
-    val surfaceColor = Color(0xFF2A2A38)
+private fun GestureIllustration(type: String, dotCount: Int, accentColor: Color = Color(0xFF2DD4BF), surfaceBg: Color = Color(0xFF0E0E14), modifier: Modifier = Modifier) {
+    val teal = accentColor
+    val surfaceColor = surfaceBg
 
     Canvas(modifier = modifier) {
         val w = size.width
