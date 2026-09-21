@@ -13,6 +13,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -189,7 +190,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 enum class AppScreen {
-    SPLASH, COMPAT_FAIL, ONBOARDING, PERMISSION, PERMISSION_DENIED, PAIRING_GUIDE, TRACKPAD
+    SPLASH, COMPAT_FAIL, ONBOARDING, PERMISSION, PERMISSION_DENIED, PAIRING_GUIDE, TRACKPAD, KEYBOARD
 }
 
 class MainActivity : ComponentActivity() {
@@ -243,6 +244,7 @@ class MainActivity : ComponentActivity() {
         private const val PINCH_DISTANCE_THRESHOLD_DP = 20f
         private const val PINCH_PIXELS_PER_STEP_DP = 20f
         private const val KEYBOARD_REPORT_ID: Int = 3
+        private const val CONSUMER_REPORT_ID: Int = 4
 
         // HID keyboard modifiers
         private const val KEY_MOD_LCTRL: Byte = 0x01
@@ -254,8 +256,17 @@ class MainActivity : ComponentActivity() {
         private const val KEY_TAB: Byte = 0x2B
         private const val KEY_D: Byte = 0x07
         private const val KEY_N: Byte = 0x11
+        private const val KEY_A: Byte = 0x04
         private const val KEY_ARROW_RIGHT: Byte = 0x4F
         private const val KEY_ARROW_LEFT: Byte = 0x50
+
+        // Consumer Control usage codes (16-bit, little-endian in report)
+        private const val CONSUMER_VOLUME_DOWN: Int = 0x00EA
+        private const val CONSUMER_VOLUME_UP: Int = 0x00E9
+        private const val CONSUMER_MUTE: Int = 0x00E2
+        private const val CONSUMER_PLAY_PAUSE: Int = 0x00CD
+        private const val CONSUMER_NEXT_TRACK: Int = 0x00B5
+        private const val CONSUMER_PREV_TRACK: Int = 0x00B6
 
         // Milestones 3.2 (3-finger) and 3.3 (4-finger) share the multi-finger
         // gesture pipeline — thresholds tuned once for both.
@@ -322,6 +333,12 @@ class MainActivity : ComponentActivity() {
 
     // Phase 1 UI navigation
     private var currentScreen by mutableStateOf(AppScreen.SPLASH)
+
+    // Keyboard report engine (Milestone 1.1)
+    private val keyboardEngine = KeyboardReportSender { modifier, keys ->
+        sendKeyboardReport(modifier, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5])
+    }
+    private var activeMode by mutableStateOf("trackpad") // trackpad, keyboard
 
     // Phase 2 trackpad surface state
     private var showGestureGuide by mutableStateOf(false)
@@ -415,17 +432,16 @@ class MainActivity : ComponentActivity() {
     private var twoFingerTapEligible = false
     private var rightClickFiredInGesture = false
 
-    // Mouse HID report descriptor: 3 buttons, relative X/Y, vertical wheel
-    // with Resolution Multiplier Feature Report for high-resolution scrolling.
-    // Report ID 1 = Input (buttons, X, Y, wheel), Report ID 2 = Feature (multiplier).
+    // Composite HID descriptor: Mouse (0x01) + Keyboard (0x02) + Consumer Control (0x03)
+    // Feature Report for Resolution Multiplier uses Report ID 0x04.
     private val mouseDescriptor = byteArrayOf(
+        // ===== Mouse Application Collection (Report ID 0x01) =====
         0x05.toByte(), 0x01.toByte(), // USAGE_PAGE (Generic Desktop)
         0x09.toByte(), 0x02.toByte(), // USAGE (Mouse)
         0xA1.toByte(), 0x01.toByte(), // COLLECTION (Application)
         0x09.toByte(), 0x01.toByte(), //   USAGE (Pointer)
         0xA1.toByte(), 0x00.toByte(), //   COLLECTION (Physical)
 
-        // --- Report ID 1: Input Report ---
         0x85.toByte(), 0x01.toByte(), //     REPORT_ID (1)
 
         // Buttons (3)
@@ -452,7 +468,7 @@ class MainActivity : ComponentActivity() {
         0x95.toByte(), 0x02.toByte(), //     REPORT_COUNT (2)
         0x81.toByte(), 0x06.toByte(), //     INPUT (Data,Var,Rel)
 
-        // --- Logical Collection: Wheel + Resolution Multiplier ---
+        // Logical Collection: Wheel + Resolution Multiplier
         0xA1.toByte(), 0x02.toByte(), //     COLLECTION (Logical)
 
         // Feature Report: Resolution Multiplier (Report ID 2)
@@ -465,12 +481,12 @@ class MainActivity : ComponentActivity() {
         0x75.toByte(), 0x02.toByte(), //       REPORT_SIZE (2)
         0x95.toByte(), 0x01.toByte(), //       REPORT_COUNT (1)
         0xB1.toByte(), 0x02.toByte(), //       FEATURE (Data,Var,Abs)
-        // Feature padding (6 bits to fill byte)
+        // Feature padding (6 bits)
         0x75.toByte(), 0x06.toByte(), //       REPORT_SIZE (6)
         0x95.toByte(), 0x01.toByte(), //       REPORT_COUNT (1)
         0xB1.toByte(), 0x01.toByte(), //       FEATURE (Cnst,Var,Abs)
 
-        // Input: Wheel (Report ID 1, bound to same Logical Collection as multiplier)
+        // Wheel (Report ID 1)
         0x85.toByte(), 0x01.toByte(), //       REPORT_ID (1)
         0x09.toByte(), 0x38.toByte(), //       USAGE (Wheel)
         0x15.toByte(), 0x81.toByte(), //       LOGICAL_MINIMUM (-127)
@@ -483,7 +499,7 @@ class MainActivity : ComponentActivity() {
 
         0xC0.toByte(),               //     END_COLLECTION (Logical)
 
-        // Horizontal wheel (AC Pan, Consumer usage 0x0238) — Milestone 2.2
+        // Horizontal wheel (AC Pan)
         0x05.toByte(), 0x0C.toByte(),                   //   USAGE_PAGE (Consumer)
         0x0A.toByte(), 0x38.toByte(), 0x02.toByte(),    //   USAGE (AC Pan)
         0x15.toByte(), 0x81.toByte(),                   //   LOGICAL_MINIMUM (-127)
@@ -493,19 +509,16 @@ class MainActivity : ComponentActivity() {
         0x81.toByte(), 0x06.toByte(),                   //   INPUT (Data,Var,Rel)
 
         0xC0.toByte(),               //   END_COLLECTION (Physical)
-        0xC0.toByte(),               // END_COLLECTION (Application)
+        0xC0.toByte(),               // END_COLLECTION (Application — Mouse)
 
-        // ===== Keyboard Application Collection (Report ID 3) =====
-        // Standard boot keyboard layout: 1 modifier byte + 1 reserved
-        // byte + 6 keycode bytes = 8-byte report. Milestone 2.4 uses only
-        // the modifier byte (Ctrl for pinch-to-zoom); Phase 3 will use
-        // the keycode array for Win+Tab, Alt+Tab, Win+D, etc.
+        // ===== Keyboard Application Collection (Report ID 0x03) =====
+        // Standard 6KRO boot protocol: modifier(1) + reserved(1) + keycodes(6) = 8 bytes
         0x05.toByte(), 0x01.toByte(), // USAGE_PAGE (Generic Desktop)
         0x09.toByte(), 0x06.toByte(), // USAGE (Keyboard)
         0xA1.toByte(), 0x01.toByte(), // COLLECTION (Application)
-        0x85.toByte(), KEYBOARD_REPORT_ID.toByte(), //   REPORT_ID (3)
+        0x85.toByte(), 0x03.toByte(), //   REPORT_ID (3)
 
-        // Modifier byte (8 bits: LCtrl LShift LAlt LGui RCtrl RShift RAlt RGui)
+        // Modifier byte (LCtrl LShift LAlt LGui RCtrl RShift RAlt RGui)
         0x05.toByte(), 0x07.toByte(), //   USAGE_PAGE (Key Codes)
         0x19.toByte(), 0xE0.toByte(), //   USAGE_MINIMUM (LCtrl)
         0x29.toByte(), 0xE7.toByte(), //   USAGE_MAXIMUM (RGui)
@@ -520,7 +533,7 @@ class MainActivity : ComponentActivity() {
         0x95.toByte(), 0x01.toByte(), //   REPORT_COUNT (1)
         0x81.toByte(), 0x03.toByte(), //   INPUT (Cnst,Var,Abs)
 
-        // 6 keycodes (array — up to 6 keys held simultaneously)
+        // 6 keycodes (6KRO array)
         0x05.toByte(), 0x07.toByte(), //   USAGE_PAGE (Key Codes)
         0x19.toByte(), 0x00.toByte(), //   USAGE_MINIMUM (0)
         0x29.toByte(), 0xFF.toByte(), //   USAGE_MAXIMUM (255)
@@ -530,7 +543,24 @@ class MainActivity : ComponentActivity() {
         0x95.toByte(), 0x06.toByte(), //   REPORT_COUNT (6)
         0x81.toByte(), 0x00.toByte(), //   INPUT (Data,Ary,Abs)
 
-        0xC0.toByte()                // END_COLLECTION (Application)
+        0xC0.toByte(),               // END_COLLECTION (Application — Keyboard)
+
+        // ===== Consumer Control Application Collection (Report ID 0x04) =====
+        // 16-bit usage code for media keys (volume, play/pause, etc.)
+        0x05.toByte(), 0x0C.toByte(), // USAGE_PAGE (Consumer)
+        0x09.toByte(), 0x01.toByte(), // USAGE (Consumer Control)
+        0xA1.toByte(), 0x01.toByte(), // COLLECTION (Application)
+        0x85.toByte(), 0x04.toByte(), //   REPORT_ID (4)
+
+        0x15.toByte(), 0x00.toByte(), //   LOGICAL_MINIMUM (0)
+        0x26.toByte(), 0xFF.toByte(), 0x03.toByte(), // LOGICAL_MAXIMUM (0x03FF)
+        0x19.toByte(), 0x00.toByte(), //   USAGE_MINIMUM (0)
+        0x2A.toByte(), 0xFF.toByte(), 0x03.toByte(), // USAGE_MAXIMUM (0x03FF)
+        0x75.toByte(), 0x10.toByte(), //   REPORT_SIZE (16)
+        0x95.toByte(), 0x01.toByte(), //   REPORT_COUNT (1)
+        0x81.toByte(), 0x00.toByte(), //   INPUT (Data,Ary,Abs)
+
+        0xC0.toByte()                // END_COLLECTION (Application — Consumer)
     )
 
     private val permissionLauncher = registerForActivityResult(
@@ -808,65 +838,120 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToTrackpad = { currentScreen = AppScreen.TRACKPAD },
                                 modifier = Modifier.padding(innerPadding)
                             )
-                            AppScreen.TRACKPAD -> TrackpadScreen(
-                                connectionStatus = connectionStatus,
-                                bondedDevices = bondedDevices,
-                                isConnected = connectedDevice != null,
-                                connectedHostName = connectedDevice?.let { getDeviceDisplayName(it) },
-                                onDeviceSelected = { device -> connectToDevice(device) },
-                                onTouchEvent = { event -> handleTrackpadTouch(event) },
-                                showSettings = showSettings,
-                                onToggleSettings = { showSettings = !showSettings },
-                                sensitivity = sensitivityMultiplier,
-                                onSensitivityChange = { sensitivityMultiplier = it; saveHostSettings() },
-                                tapToClick = tapToClickEnabled,
-                                onTapToClickChange = { tapToClickEnabled = it; saveHostSettings() },
-                                naturalScroll = naturalScrollEnabled,
-                                onNaturalScrollChange = { naturalScrollEnabled = it; saveHostSettings() },
-                                rippleEnabled = rippleEnabled,
-                                onRippleChange = { rippleEnabled = it; saveHostSettings() },
-                                hapticsEnabled = hapticsEnabled,
-                                onHapticsChange = { hapticsEnabled = it; saveHostSettings() },
-                                statusBarAutoHide = statusBarAutoHide,
-                                onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
-                                trackpadTheme = trackpadTheme,
-                                onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
-                                uiTheme = uiTheme,
-                                onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
-                                batteryPercent = getBatteryPercent(),
-                                onToggleGestureGuide = { settingsInitialTab = 1; showSettings = true },
-                                settingsInitialTab = settingsInitialTab,
-                                showDeviceManager = showDeviceManager,
-                                onToggleDeviceManager = { showDeviceManager = !showDeviceManager },
-                                onDismissDeviceManager = { showDeviceManager = false },
-                                deviceNicknames = deviceNicknames,
-                                onRenameDevice = { addr, name -> saveDeviceNickname(addr, name) },
-                                onForgetDevice = { device -> forgetDevice(device) },
-                                onNavigateToPairingGuide = {
-                                    showDeviceManager = false
-                                    showSettings = false
-                                    currentScreen = AppScreen.PAIRING_GUIDE
-                                },
-                                isBluetoothOff = isBluetoothOff,
-                                onTurnOnBluetooth = {
-                                    try {
-                                        startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
-                                    } catch (_: Exception) {}
-                                },
-                                showDisconnectSheet = showDisconnectSheet,
-                                disconnectAutoReconnectFailed = disconnectAutoReconnectFailed,
-                                onDismissDisconnectSheet = { showDisconnectSheet = false },
-                                onRetryConnect = {
-                                    showDisconnectSheet = false
-                                    disconnectAutoReconnectFailed = false
-                                    autoReconnectAttempted = false
-                                    ensureHidSession()
-                                },
-                                appVersion = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" },
-                                hasBluetoothPermissions = hasBluetoothPermissions(),
-                                onRequestPermissions = { requestBluetoothPermissions() },
-                                onOpenAppSettings = { openAppSettings() },
-                                modifier = Modifier
+                            AppScreen.TRACKPAD -> Box {
+                                TrackpadScreen(
+                                    connectionStatus = connectionStatus,
+                                    bondedDevices = bondedDevices,
+                                    isConnected = connectedDevice != null,
+                                    connectedHostName = connectedDevice?.let { getDeviceDisplayName(it) },
+                                    onDeviceSelected = { device -> connectToDevice(device) },
+                                    onTouchEvent = { event -> handleTrackpadTouch(event) },
+                                    showSettings = showSettings,
+                                    onToggleSettings = { showSettings = !showSettings },
+                                    sensitivity = sensitivityMultiplier,
+                                    onSensitivityChange = { sensitivityMultiplier = it; saveHostSettings() },
+                                    tapToClick = tapToClickEnabled,
+                                    onTapToClickChange = { tapToClickEnabled = it; saveHostSettings() },
+                                    naturalScroll = naturalScrollEnabled,
+                                    onNaturalScrollChange = { naturalScrollEnabled = it; saveHostSettings() },
+                                    rippleEnabled = rippleEnabled,
+                                    onRippleChange = { rippleEnabled = it; saveHostSettings() },
+                                    hapticsEnabled = hapticsEnabled,
+                                    onHapticsChange = { hapticsEnabled = it; saveHostSettings() },
+                                    statusBarAutoHide = statusBarAutoHide,
+                                    onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
+                                    trackpadTheme = trackpadTheme,
+                                    onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
+                                    uiTheme = uiTheme,
+                                    onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
+                                    batteryPercent = getBatteryPercent(),
+                                    onToggleGestureGuide = { settingsInitialTab = 1; showSettings = true },
+                                    settingsInitialTab = settingsInitialTab,
+                                    showDeviceManager = showDeviceManager,
+                                    onToggleDeviceManager = { showDeviceManager = !showDeviceManager },
+                                    onDismissDeviceManager = { showDeviceManager = false },
+                                    deviceNicknames = deviceNicknames,
+                                    onRenameDevice = { addr, name -> saveDeviceNickname(addr, name) },
+                                    onForgetDevice = { device -> forgetDevice(device) },
+                                    onNavigateToPairingGuide = {
+                                        showDeviceManager = false
+                                        showSettings = false
+                                        currentScreen = AppScreen.PAIRING_GUIDE
+                                    },
+                                    isBluetoothOff = isBluetoothOff,
+                                    onTurnOnBluetooth = {
+                                        try {
+                                            startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
+                                        } catch (_: Exception) {}
+                                    },
+                                    showDisconnectSheet = showDisconnectSheet,
+                                    disconnectAutoReconnectFailed = disconnectAutoReconnectFailed,
+                                    onDismissDisconnectSheet = { showDisconnectSheet = false },
+                                    onRetryConnect = {
+                                        showDisconnectSheet = false
+                                        disconnectAutoReconnectFailed = false
+                                        autoReconnectAttempted = false
+                                        ensureHidSession()
+                                    },
+                                    appVersion = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" },
+                                    hasBluetoothPermissions = hasBluetoothPermissions(),
+                                    onRequestPermissions = { requestBluetoothPermissions() },
+                                    onOpenAppSettings = { openAppSettings() },
+                                    modifier = Modifier
+                                )
+                                // ── Milestone 1.0 test buttons + keyboard switch ──
+                                if (!showSettings) {
+                                    Column(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(top = 40.dp, end = 12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        // Test: type 'a' via keyboard report
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF7C6AF6))
+                                                .clickable {
+                                                    sendKeyboardReport(0x00, KEY_A)
+                                                    sendKeyboardReport(0x00)
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("A", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        // Test: volume down via consumer report
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF3DDC84))
+                                                .clickable { sendConsumerKeyPress(CONSUMER_VOLUME_DOWN) },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("V-", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        // Switch to keyboard
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFFF6B6B))
+                                                .clickable { currentScreen = AppScreen.KEYBOARD },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("⌨", fontSize = 20.sp)
+                                        }
+                                    }
+                                }
+                            }
+                            AppScreen.KEYBOARD -> KeyboardScreen(
+                                keyboardEngine = keyboardEngine,
+                                onSwitchToTrackpad = {
+                                    keyboardEngine.releaseAll()
+                                    currentScreen = AppScreen.TRACKPAD
+                                }
                             )
                         }
                     }
@@ -1673,6 +1758,25 @@ class MainActivity : ComponentActivity() {
         if (!ok) Log.w(TAG, "sendKeyboardReport failed: modifier=$modifier")
     }
 
+    @SuppressLint("MissingPermission")
+    private fun sendConsumerReport(usageCode: Int) {
+        val hid = hidDevice ?: return
+        val device = connectedDevice ?: return
+        // 16-bit usage code, little-endian
+        val report = byteArrayOf(
+            (usageCode and 0xFF).toByte(),
+            ((usageCode shr 8) and 0xFF).toByte()
+        )
+        val ok = hid.sendReport(device, CONSUMER_REPORT_ID, report)
+        if (!ok) Log.w(TAG, "sendConsumerReport failed: usage=0x${usageCode.toString(16)}")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendConsumerKeyPress(usageCode: Int) {
+        sendConsumerReport(usageCode)  // press
+        sendConsumerReport(0x0000)     // release
+    }
+
     /**
      * Send a modifier + key press using the strict HID sequence Windows
      * expects: modifier alone → modifier + key → modifier alone → all released.
@@ -2107,6 +2211,189 @@ class MainActivity : ComponentActivity() {
         if (!result) {
             Log.w(TAG, "sendReport failed: buttons=$buttons, dx=$dx, dy=$dy, wheel=$wheel, wheelH=$wheelH")
         }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Keyboard Report Engine (Milestone 1.1)
+// ──────────────────────────────────────────────────────────────────────────────
+
+class KeyboardReportSender(
+    private val sendReport: (modifier: Byte, keys: ByteArray) -> Unit
+) {
+    private var modifierBitmap: Byte = 0
+    private val heldKeys = mutableListOf<Byte>()
+    private val handler = Handler(Looper.getMainLooper())
+    private var repeatKey: Byte = 0
+    private var repeatRunnable: Runnable? = null
+
+    companion object {
+        private const val REPEAT_DELAY_MS = 500L
+        private const val REPEAT_INTERVAL_MS = 33L // ~30 reports/sec
+        private const val ROLLOVER_ERROR: Byte = 0x01
+
+        // Modifier bit positions in the HID modifier bitmap
+        const val MOD_LCTRL: Byte = 0x01
+        const val MOD_LSHIFT: Byte = 0x02
+        const val MOD_LALT: Byte = 0x04
+        const val MOD_LGUI: Byte = 0x08
+        const val MOD_RCTRL: Byte = 0x10
+        const val MOD_RSHIFT: Byte = 0x20
+        const val MOD_RALT: Byte = 0x40
+        @Suppress("unused")
+        val MOD_RGUI: Byte = 0x80.toByte()
+
+        // HID Usage IDs (page 0x07) for standard keys
+        const val KEY_A: Byte = 0x04
+        const val KEY_B: Byte = 0x05
+        const val KEY_C: Byte = 0x06
+        const val KEY_D: Byte = 0x07
+        const val KEY_E: Byte = 0x08
+        const val KEY_F: Byte = 0x09
+        const val KEY_G: Byte = 0x0A
+        const val KEY_H: Byte = 0x0B
+        const val KEY_I: Byte = 0x0C
+        const val KEY_J: Byte = 0x0D
+        const val KEY_K: Byte = 0x0E
+        const val KEY_L: Byte = 0x0F
+        const val KEY_M: Byte = 0x10
+        const val KEY_N: Byte = 0x11
+        const val KEY_O: Byte = 0x12
+        const val KEY_P: Byte = 0x13
+        const val KEY_Q: Byte = 0x14
+        const val KEY_R: Byte = 0x15
+        const val KEY_S: Byte = 0x16
+        const val KEY_T: Byte = 0x17
+        const val KEY_U: Byte = 0x18
+        const val KEY_V: Byte = 0x19
+        const val KEY_W: Byte = 0x1A
+        const val KEY_X: Byte = 0x1B
+        const val KEY_Y: Byte = 0x1C
+        const val KEY_Z: Byte = 0x1D
+        const val KEY_1: Byte = 0x1E
+        const val KEY_2: Byte = 0x1F
+        const val KEY_3: Byte = 0x20
+        const val KEY_4: Byte = 0x21
+        const val KEY_5: Byte = 0x22
+        const val KEY_6: Byte = 0x23
+        const val KEY_7: Byte = 0x24
+        const val KEY_8: Byte = 0x25
+        const val KEY_9: Byte = 0x26
+        const val KEY_0: Byte = 0x27
+        const val KEY_ENTER: Byte = 0x28
+        const val KEY_ESCAPE: Byte = 0x29
+        const val KEY_BACKSPACE: Byte = 0x2A
+        const val KEY_TAB: Byte = 0x2B
+        const val KEY_SPACE: Byte = 0x2C
+        const val KEY_MINUS: Byte = 0x2D
+        const val KEY_EQUALS: Byte = 0x2E
+        const val KEY_LBRACKET: Byte = 0x2F
+        const val KEY_RBRACKET: Byte = 0x30
+        const val KEY_BACKSLASH: Byte = 0x31
+        const val KEY_SEMICOLON: Byte = 0x33
+        const val KEY_APOSTROPHE: Byte = 0x34
+        const val KEY_GRAVE: Byte = 0x35
+        const val KEY_COMMA: Byte = 0x36
+        const val KEY_PERIOD: Byte = 0x37
+        const val KEY_SLASH: Byte = 0x38
+        const val KEY_CAPS_LOCK: Byte = 0x39
+        const val KEY_F1: Byte = 0x3A
+        const val KEY_F2: Byte = 0x3B
+        const val KEY_F3: Byte = 0x3C
+        const val KEY_F4: Byte = 0x3D
+        const val KEY_F5: Byte = 0x3E
+        const val KEY_F6: Byte = 0x3F
+        const val KEY_F7: Byte = 0x40
+        const val KEY_F8: Byte = 0x41
+        const val KEY_F9: Byte = 0x42
+        const val KEY_F10: Byte = 0x43
+        const val KEY_F11: Byte = 0x44
+        const val KEY_F12: Byte = 0x45
+        const val KEY_INSERT: Byte = 0x49
+        const val KEY_HOME: Byte = 0x4A
+        const val KEY_PAGE_UP: Byte = 0x4B
+        const val KEY_DELETE: Byte = 0x4C
+        const val KEY_END: Byte = 0x4D
+        const val KEY_PAGE_DOWN: Byte = 0x4E
+        const val KEY_ARROW_RIGHT: Byte = 0x4F
+        const val KEY_ARROW_LEFT: Byte = 0x50
+        const val KEY_ARROW_DOWN: Byte = 0x51
+        const val KEY_ARROW_UP: Byte = 0x52
+    }
+
+    fun pressModifier(mod: Byte) {
+        modifierBitmap = (modifierBitmap.toInt() or mod.toInt()).toByte()
+        flushReport()
+    }
+
+    fun releaseModifier(mod: Byte) {
+        modifierBitmap = (modifierBitmap.toInt() and mod.toInt().inv()).toByte()
+        flushReport()
+    }
+
+    fun pressKey(hidUsage: Byte) {
+        if (hidUsage.toInt() == 0) return
+        if (heldKeys.contains(hidUsage)) return
+
+        heldKeys.add(hidUsage)
+        flushReport()
+        startRepeat(hidUsage)
+    }
+
+    fun releaseKey(hidUsage: Byte) {
+        heldKeys.remove(hidUsage)
+        stopRepeat(hidUsage)
+        flushReport()
+    }
+
+    fun releaseAll() {
+        modifierBitmap = 0
+        heldKeys.clear()
+        stopAllRepeats()
+        flushReport()
+    }
+
+    fun isModifierHeld(mod: Byte): Boolean =
+        (modifierBitmap.toInt() and mod.toInt()) != 0
+
+    private fun flushReport() {
+        val keys = ByteArray(6)
+        if (heldKeys.size > 6) {
+            // 6KRO rollover error — fill all slots with 0x01
+            for (i in 0..5) keys[i] = ROLLOVER_ERROR
+        } else {
+            for (i in heldKeys.indices) {
+                keys[i] = heldKeys[i]
+            }
+        }
+        sendReport(modifierBitmap, keys)
+    }
+
+    private fun startRepeat(hidUsage: Byte) {
+        stopAllRepeats()
+        repeatKey = hidUsage
+        val runnable = object : Runnable {
+            override fun run() {
+                if (heldKeys.contains(repeatKey)) {
+                    flushReport()
+                    handler.postDelayed(this, REPEAT_INTERVAL_MS)
+                }
+            }
+        }
+        repeatRunnable = runnable
+        handler.postDelayed(runnable, REPEAT_DELAY_MS)
+    }
+
+    private fun stopRepeat(hidUsage: Byte) {
+        if (repeatKey == hidUsage) {
+            stopAllRepeats()
+        }
+    }
+
+    private fun stopAllRepeats() {
+        repeatRunnable?.let { handler.removeCallbacks(it) }
+        repeatRunnable = null
+        repeatKey = 0
     }
 }
 
@@ -5637,6 +5924,203 @@ private fun GestureIllustration(type: String, dotCount: Int, accentColor: Color 
                 // side arrows
                 drawLine(teal.copy(alpha = 0.4f), Offset(cx - spacing * 1.5f, cy), Offset(cx - spacing * 2.2f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
                 drawLine(teal.copy(alpha = 0.4f), Offset(cx + spacing * 1.5f, cy), Offset(cx + spacing * 2.2f, cy), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Keyboard Screen (Milestone 1.2)
+// ──────────────────────────────────────────────────────────────────────────────
+
+enum class ShiftState { OFF, SHIFTED, CAPS_LOCK }
+
+@Composable
+fun KeyboardScreen(
+    keyboardEngine: KeyboardReportSender,
+    onSwitchToTrackpad: () -> Unit
+) {
+    val context = LocalContext.current
+    val activity = context as? ComponentActivity
+
+    DisposableEffect(Unit) {
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    var shiftState by remember { mutableStateOf(ShiftState.OFF) }
+    var ctrlHeld by remember { mutableStateOf(false) }
+    val isShifted = shiftState != ShiftState.OFF
+
+    val keyBg = Color(0xFF1A1A2E)
+    val keyBgSpecial = Color(0xFF12121F)
+    val keyBgShiftActive = Color(0xFF7C6AF6)
+    val keyBgCtrlActive = Color(0xFF3DDC84)
+    val keyText = Color(0xFFE0E0E0)
+    val keyTextDim = Color(0xFF9090A0)
+    val surfaceBg = Color(0xFF08080D)
+
+    data class K(
+        val label: String,
+        val shiftLabel: String = label.uppercase(),
+        val hid: Byte = 0,
+        val w: Float = 1f,
+        val isShift: Boolean = false,
+        val isMod: Boolean = false,
+        val modByte: Byte = 0,
+        val isSpecial: Boolean = false
+    )
+
+    val rows = listOf(
+        listOf(
+            K("`", "~", KeyboardReportSender.KEY_GRAVE),
+            K("1", "!", KeyboardReportSender.KEY_1), K("2", "@", KeyboardReportSender.KEY_2),
+            K("3", "#", KeyboardReportSender.KEY_3), K("4", "$", KeyboardReportSender.KEY_4),
+            K("5", "%", KeyboardReportSender.KEY_5), K("6", "^", KeyboardReportSender.KEY_6),
+            K("7", "&", KeyboardReportSender.KEY_7), K("8", "*", KeyboardReportSender.KEY_8),
+            K("9", "(", KeyboardReportSender.KEY_9), K("0", ")", KeyboardReportSender.KEY_0),
+            K("-", "_", KeyboardReportSender.KEY_MINUS), K("=", "+", KeyboardReportSender.KEY_EQUALS),
+            K("⌫", "⌫", KeyboardReportSender.KEY_BACKSPACE, w = 1.5f, isSpecial = true)
+        ),
+        listOf(
+            K("Tab", "Tab", KeyboardReportSender.KEY_TAB, w = 1.3f, isSpecial = true),
+            K("q", "Q", KeyboardReportSender.KEY_Q), K("w", "W", KeyboardReportSender.KEY_W),
+            K("e", "E", KeyboardReportSender.KEY_E), K("r", "R", KeyboardReportSender.KEY_R),
+            K("t", "T", KeyboardReportSender.KEY_T), K("y", "Y", KeyboardReportSender.KEY_Y),
+            K("u", "U", KeyboardReportSender.KEY_U), K("i", "I", KeyboardReportSender.KEY_I),
+            K("o", "O", KeyboardReportSender.KEY_O), K("p", "P", KeyboardReportSender.KEY_P),
+            K("[", "{", KeyboardReportSender.KEY_LBRACKET), K("]", "}", KeyboardReportSender.KEY_RBRACKET),
+            K("\\", "|", KeyboardReportSender.KEY_BACKSLASH)
+        ),
+        listOf(
+            K("Caps", "Caps", KeyboardReportSender.KEY_CAPS_LOCK, w = 1.6f, isSpecial = true),
+            K("a", "A", KeyboardReportSender.KEY_A), K("s", "S", KeyboardReportSender.KEY_S),
+            K("d", "D", KeyboardReportSender.KEY_D), K("f", "F", KeyboardReportSender.KEY_F),
+            K("g", "G", KeyboardReportSender.KEY_G), K("h", "H", KeyboardReportSender.KEY_H),
+            K("j", "J", KeyboardReportSender.KEY_J), K("k", "K", KeyboardReportSender.KEY_K),
+            K("l", "L", KeyboardReportSender.KEY_L), K(";", ":", KeyboardReportSender.KEY_SEMICOLON),
+            K("'", "\"", KeyboardReportSender.KEY_APOSTROPHE),
+            K("Enter", "Enter", KeyboardReportSender.KEY_ENTER, w = 1.6f, isSpecial = true)
+        ),
+        listOf(
+            K("⇧", "⇧", 0, w = 2f, isShift = true, isSpecial = true),
+            K("z", "Z", KeyboardReportSender.KEY_Z), K("x", "X", KeyboardReportSender.KEY_X),
+            K("c", "C", KeyboardReportSender.KEY_C), K("v", "V", KeyboardReportSender.KEY_V),
+            K("b", "B", KeyboardReportSender.KEY_B), K("n", "N", KeyboardReportSender.KEY_N),
+            K("m", "M", KeyboardReportSender.KEY_M), K(",", "<", KeyboardReportSender.KEY_COMMA),
+            K(".", ">", KeyboardReportSender.KEY_PERIOD), K("/", "?", KeyboardReportSender.KEY_SLASH),
+            K("⇧", "⇧", 0, w = 2f, isShift = true, isSpecial = true)
+        ),
+        listOf(
+            K("Ctrl", "Ctrl", 0, w = 1.5f, isMod = true, modByte = KeyboardReportSender.MOD_LCTRL, isSpecial = true),
+            K("Alt", "Alt", 0, w = 1.2f, isMod = true, modByte = KeyboardReportSender.MOD_LALT, isSpecial = true),
+            K("Space", "Space", KeyboardReportSender.KEY_SPACE, w = 6f),
+            K("←", "←", KeyboardReportSender.KEY_ARROW_LEFT, isSpecial = true),
+            K("↑", "↑", KeyboardReportSender.KEY_ARROW_UP, isSpecial = true),
+            K("↓", "↓", KeyboardReportSender.KEY_ARROW_DOWN, isSpecial = true),
+            K("→", "→", KeyboardReportSender.KEY_ARROW_RIGHT, isSpecial = true),
+            K("🖱", "🖱", 0, w = 1.3f, isSpecial = true)
+        )
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(surfaceBg)
+            .windowInsetsPadding(WindowInsets.systemBars)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            for (row in rows) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    for (key in row) {
+                        val bg = when {
+                            key.isShift && shiftState == ShiftState.CAPS_LOCK -> keyBgShiftActive
+                            key.isShift && shiftState == ShiftState.SHIFTED -> keyBgShiftActive.copy(alpha = 0.7f)
+                            key.isMod && key.modByte == KeyboardReportSender.MOD_LCTRL && ctrlHeld -> keyBgCtrlActive
+                            key.isSpecial -> keyBgSpecial
+                            else -> keyBg
+                        }
+                        val displayLabel = if (isShifted && !key.isSpecial && !key.isMod) key.shiftLabel else key.label
+
+                        Box(
+                            modifier = Modifier
+                                .weight(key.w)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(bg)
+                                .pointerInput(key.label + key.hid) {
+                                    awaitEachGesture {
+                                        awaitFirstDown(requireUnconsumed = false).also { it.consume() }
+                                        when {
+                                            key.isShift -> {
+                                                shiftState = when (shiftState) {
+                                                    ShiftState.OFF -> ShiftState.SHIFTED
+                                                    ShiftState.SHIFTED -> ShiftState.CAPS_LOCK
+                                                    ShiftState.CAPS_LOCK -> ShiftState.OFF
+                                                }
+                                                if (shiftState != ShiftState.OFF) keyboardEngine.pressModifier(KeyboardReportSender.MOD_LSHIFT)
+                                                else keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
+                                            }
+                                            key.isMod -> {
+                                                if (key.modByte == KeyboardReportSender.MOD_LCTRL) {
+                                                    ctrlHeld = !ctrlHeld
+                                                    if (ctrlHeld) keyboardEngine.pressModifier(key.modByte)
+                                                    else keyboardEngine.releaseModifier(key.modByte)
+                                                } else {
+                                                    keyboardEngine.pressModifier(key.modByte)
+                                                }
+                                            }
+                                            key.label == "🖱" -> onSwitchToTrackpad()
+                                            else -> keyboardEngine.pressKey(key.hid)
+                                        }
+                                        // Wait for finger lift
+                                        do {
+                                            val ev = awaitPointerEvent()
+                                            ev.changes.forEach { it.consume() }
+                                        } while (ev.changes.any { it.pressed })
+                                        // Release
+                                        when {
+                                            key.isShift -> {}
+                                            key.isMod -> {
+                                                if (key.modByte != KeyboardReportSender.MOD_LCTRL) {
+                                                    keyboardEngine.releaseModifier(key.modByte)
+                                                }
+                                            }
+                                            key.label == "🖱" -> {}
+                                            else -> {
+                                                keyboardEngine.releaseKey(key.hid)
+                                                if (shiftState == ShiftState.SHIFTED) {
+                                                    shiftState = ShiftState.OFF
+                                                    keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
+                                                }
+                                                if (ctrlHeld) {
+                                                    ctrlHeld = false
+                                                    keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LCTRL)
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = displayLabel,
+                                color = if (key.isSpecial) keyTextDim else keyText,
+                                fontSize = if (key.label.length > 1 && !key.isShift) 10.sp else 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
             }
         }
     }
