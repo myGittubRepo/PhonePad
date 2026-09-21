@@ -5930,18 +5930,124 @@ private fun GestureIllustration(type: String, dotCount: Int, accentColor: Color 
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Keyboard Screen (Milestone 1.2)
+// Keyboard Layout Engine (Milestone 2.0)
 // ──────────────────────────────────────────────────────────────────────────────
 
 enum class ShiftState { OFF, SHIFTED, CAPS_LOCK }
 
+enum class KeyType { CHAR, MODIFIER, SHIFT, ACTION }
+
+data class KeyDef(
+    val label: String,
+    val shiftLabel: String = label.uppercase(),
+    val hid: Byte = 0,
+    val widthUnits: Float = 1.0f,
+    val type: KeyType = KeyType.CHAR,
+    val modByte: Byte = 0,
+    val actionId: String = ""
+)
+
+data class KeyboardLayout(
+    val rows: List<List<KeyDef>>,
+    val keyGapDp: Float = 2f,
+    val rowGapDp: Float = 3f
+)
+
+object KeyboardLayouts {
+    private val S = KeyboardReportSender
+
+    val FULL_QWERTY = KeyboardLayout(
+        rows = listOf(
+            // Row 0: Esc + Function keys + Delete
+            listOf(
+                KeyDef("Esc", "Esc", S.KEY_ESCAPE, 1.0f, KeyType.CHAR),
+                KeyDef("F1", "F1", S.KEY_F1, 1.0f, KeyType.CHAR),
+                KeyDef("F2", "F2", S.KEY_F2, 1.0f, KeyType.CHAR),
+                KeyDef("F3", "F3", S.KEY_F3, 1.0f, KeyType.CHAR),
+                KeyDef("F4", "F4", S.KEY_F4, 1.0f, KeyType.CHAR),
+                KeyDef("F5", "F5", S.KEY_F5, 1.0f, KeyType.CHAR),
+                KeyDef("F6", "F6", S.KEY_F6, 1.0f, KeyType.CHAR),
+                KeyDef("F7", "F7", S.KEY_F7, 1.0f, KeyType.CHAR),
+                KeyDef("F8", "F8", S.KEY_F8, 1.0f, KeyType.CHAR),
+                KeyDef("F9", "F9", S.KEY_F9, 1.0f, KeyType.CHAR),
+                KeyDef("F10", "F10", S.KEY_F10, 1.0f, KeyType.CHAR),
+                KeyDef("F11", "F11", S.KEY_F11, 1.0f, KeyType.CHAR),
+                KeyDef("F12", "F12", S.KEY_F12, 1.0f, KeyType.CHAR),
+                KeyDef("Del", "Del", S.KEY_DELETE, 1.0f, KeyType.CHAR)
+            ),
+            // Row 1: Number row
+            listOf(
+                KeyDef("`", "~", S.KEY_GRAVE),
+                KeyDef("1", "!", S.KEY_1), KeyDef("2", "@", S.KEY_2),
+                KeyDef("3", "#", S.KEY_3), KeyDef("4", "$", S.KEY_4),
+                KeyDef("5", "%", S.KEY_5), KeyDef("6", "^", S.KEY_6),
+                KeyDef("7", "&", S.KEY_7), KeyDef("8", "*", S.KEY_8),
+                KeyDef("9", "(", S.KEY_9), KeyDef("0", ")", S.KEY_0),
+                KeyDef("-", "_", S.KEY_MINUS), KeyDef("=", "+", S.KEY_EQUALS),
+                KeyDef("⌫", "⌫", S.KEY_BACKSPACE, 1.5f, KeyType.CHAR)
+            ),
+            // Row 2: QWERTY
+            listOf(
+                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
+                KeyDef("q", "Q", S.KEY_Q), KeyDef("w", "W", S.KEY_W),
+                KeyDef("e", "E", S.KEY_E), KeyDef("r", "R", S.KEY_R),
+                KeyDef("t", "T", S.KEY_T), KeyDef("y", "Y", S.KEY_Y),
+                KeyDef("u", "U", S.KEY_U), KeyDef("i", "I", S.KEY_I),
+                KeyDef("o", "O", S.KEY_O), KeyDef("p", "P", S.KEY_P),
+                KeyDef("[", "{", S.KEY_LBRACKET), KeyDef("]", "}", S.KEY_RBRACKET),
+                KeyDef("\\", "|", S.KEY_BACKSLASH, 1.25f)
+            ),
+            // Row 3: Home row
+            listOf(
+                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
+                KeyDef("a", "A", S.KEY_A), KeyDef("s", "S", S.KEY_S),
+                KeyDef("d", "D", S.KEY_D), KeyDef("f", "F", S.KEY_F),
+                KeyDef("g", "G", S.KEY_G), KeyDef("h", "H", S.KEY_H),
+                KeyDef("j", "J", S.KEY_J), KeyDef("k", "K", S.KEY_K),
+                KeyDef("l", "L", S.KEY_L), KeyDef(";", ":", S.KEY_SEMICOLON),
+                KeyDef("'", "\"", S.KEY_APOSTROPHE),
+                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
+            ),
+            // Row 4: Bottom row
+            listOf(
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
+                KeyDef("z", "Z", S.KEY_Z), KeyDef("x", "X", S.KEY_X),
+                KeyDef("c", "C", S.KEY_C), KeyDef("v", "V", S.KEY_V),
+                KeyDef("b", "B", S.KEY_B), KeyDef("n", "N", S.KEY_N),
+                KeyDef("m", "M", S.KEY_M), KeyDef(",", "<", S.KEY_COMMA),
+                KeyDef(".", ">", S.KEY_PERIOD), KeyDef("/", "?", S.KEY_SLASH),
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
+            ),
+            // Row 5: Space row
+            listOf(
+                KeyDef("Ctrl", "Ctrl", 0, 1.5f, KeyType.MODIFIER, S.MOD_LCTRL),
+                KeyDef("Win", "Win", 0, 1.0f, KeyType.ACTION, actionId = "win"),
+                KeyDef("Alt", "Alt", 0, 1.2f, KeyType.MODIFIER, S.MOD_LALT),
+                KeyDef("", "", S.KEY_SPACE, 6.0f, KeyType.CHAR),
+                KeyDef("Alt", "Alt", 0, 1.0f, KeyType.MODIFIER, S.MOD_RALT),
+                KeyDef("←", "←", S.KEY_ARROW_LEFT),
+                KeyDef("↑", "↑", S.KEY_ARROW_UP),
+                KeyDef("↓", "↓", S.KEY_ARROW_DOWN),
+                KeyDef("→", "→", S.KEY_ARROW_RIGHT),
+                KeyDef("🖱", "🖱", 0, 1.0f, KeyType.ACTION, actionId = "trackpad")
+            )
+        )
+    )
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Keyboard Rendering Engine (Milestone 2.0 + 2.1)
+// ──────────────────────────────────────────────────────────────────────────────
+
 @Composable
 fun KeyboardScreen(
     keyboardEngine: KeyboardReportSender,
-    onSwitchToTrackpad: () -> Unit
+    onSwitchToTrackpad: () -> Unit,
+    layout: KeyboardLayout = KeyboardLayouts.FULL_QWERTY
 ) {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
+    val view = LocalView.current
 
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -5951,79 +6057,12 @@ fun KeyboardScreen(
     }
 
     var shiftState by remember { mutableStateOf(ShiftState.OFF) }
-    var ctrlHeld by remember { mutableStateOf(false) }
+    val heldModifiers = remember { mutableStateListOf<Byte>() }
     val isShifted = shiftState != ShiftState.OFF
 
-    val keyBg = Color(0xFF1A1A2E)
-    val keyBgSpecial = Color(0xFF12121F)
-    val keyBgShiftActive = Color(0xFF7C6AF6)
-    val keyBgCtrlActive = Color(0xFF3DDC84)
-    val keyText = Color(0xFFE0E0E0)
-    val keyTextDim = Color(0xFF9090A0)
     val surfaceBg = Color(0xFF08080D)
-
-    data class K(
-        val label: String,
-        val shiftLabel: String = label.uppercase(),
-        val hid: Byte = 0,
-        val w: Float = 1f,
-        val isShift: Boolean = false,
-        val isMod: Boolean = false,
-        val modByte: Byte = 0,
-        val isSpecial: Boolean = false
-    )
-
-    val rows = listOf(
-        listOf(
-            K("`", "~", KeyboardReportSender.KEY_GRAVE),
-            K("1", "!", KeyboardReportSender.KEY_1), K("2", "@", KeyboardReportSender.KEY_2),
-            K("3", "#", KeyboardReportSender.KEY_3), K("4", "$", KeyboardReportSender.KEY_4),
-            K("5", "%", KeyboardReportSender.KEY_5), K("6", "^", KeyboardReportSender.KEY_6),
-            K("7", "&", KeyboardReportSender.KEY_7), K("8", "*", KeyboardReportSender.KEY_8),
-            K("9", "(", KeyboardReportSender.KEY_9), K("0", ")", KeyboardReportSender.KEY_0),
-            K("-", "_", KeyboardReportSender.KEY_MINUS), K("=", "+", KeyboardReportSender.KEY_EQUALS),
-            K("⌫", "⌫", KeyboardReportSender.KEY_BACKSPACE, w = 1.5f, isSpecial = true)
-        ),
-        listOf(
-            K("Tab", "Tab", KeyboardReportSender.KEY_TAB, w = 1.3f, isSpecial = true),
-            K("q", "Q", KeyboardReportSender.KEY_Q), K("w", "W", KeyboardReportSender.KEY_W),
-            K("e", "E", KeyboardReportSender.KEY_E), K("r", "R", KeyboardReportSender.KEY_R),
-            K("t", "T", KeyboardReportSender.KEY_T), K("y", "Y", KeyboardReportSender.KEY_Y),
-            K("u", "U", KeyboardReportSender.KEY_U), K("i", "I", KeyboardReportSender.KEY_I),
-            K("o", "O", KeyboardReportSender.KEY_O), K("p", "P", KeyboardReportSender.KEY_P),
-            K("[", "{", KeyboardReportSender.KEY_LBRACKET), K("]", "}", KeyboardReportSender.KEY_RBRACKET),
-            K("\\", "|", KeyboardReportSender.KEY_BACKSLASH)
-        ),
-        listOf(
-            K("Caps", "Caps", KeyboardReportSender.KEY_CAPS_LOCK, w = 1.6f, isSpecial = true),
-            K("a", "A", KeyboardReportSender.KEY_A), K("s", "S", KeyboardReportSender.KEY_S),
-            K("d", "D", KeyboardReportSender.KEY_D), K("f", "F", KeyboardReportSender.KEY_F),
-            K("g", "G", KeyboardReportSender.KEY_G), K("h", "H", KeyboardReportSender.KEY_H),
-            K("j", "J", KeyboardReportSender.KEY_J), K("k", "K", KeyboardReportSender.KEY_K),
-            K("l", "L", KeyboardReportSender.KEY_L), K(";", ":", KeyboardReportSender.KEY_SEMICOLON),
-            K("'", "\"", KeyboardReportSender.KEY_APOSTROPHE),
-            K("Enter", "Enter", KeyboardReportSender.KEY_ENTER, w = 1.6f, isSpecial = true)
-        ),
-        listOf(
-            K("⇧", "⇧", 0, w = 2f, isShift = true, isSpecial = true),
-            K("z", "Z", KeyboardReportSender.KEY_Z), K("x", "X", KeyboardReportSender.KEY_X),
-            K("c", "C", KeyboardReportSender.KEY_C), K("v", "V", KeyboardReportSender.KEY_V),
-            K("b", "B", KeyboardReportSender.KEY_B), K("n", "N", KeyboardReportSender.KEY_N),
-            K("m", "M", KeyboardReportSender.KEY_M), K(",", "<", KeyboardReportSender.KEY_COMMA),
-            K(".", ">", KeyboardReportSender.KEY_PERIOD), K("/", "?", KeyboardReportSender.KEY_SLASH),
-            K("⇧", "⇧", 0, w = 2f, isShift = true, isSpecial = true)
-        ),
-        listOf(
-            K("Ctrl", "Ctrl", 0, w = 1.5f, isMod = true, modByte = KeyboardReportSender.MOD_LCTRL, isSpecial = true),
-            K("Alt", "Alt", 0, w = 1.2f, isMod = true, modByte = KeyboardReportSender.MOD_LALT, isSpecial = true),
-            K("Space", "Space", KeyboardReportSender.KEY_SPACE, w = 6f),
-            K("←", "←", KeyboardReportSender.KEY_ARROW_LEFT, isSpecial = true),
-            K("↑", "↑", KeyboardReportSender.KEY_ARROW_UP, isSpecial = true),
-            K("↓", "↓", KeyboardReportSender.KEY_ARROW_DOWN, isSpecial = true),
-            K("→", "→", KeyboardReportSender.KEY_ARROW_RIGHT, isSpecial = true),
-            K("🖱", "🖱", 0, w = 1.3f, isSpecial = true)
-        )
-    )
+    val keyGap = layout.keyGapDp.dp
+    val rowGap = layout.rowGapDp.dp
 
     Box(
         modifier = Modifier
@@ -6033,34 +6072,89 @@ fun KeyboardScreen(
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)
+            verticalArrangement = Arrangement.spacedBy(rowGap)
         ) {
-            for (row in rows) {
+            for (row in layout.rows) {
+                val totalUnits = row.sumOf { it.widthUnits.toDouble() }.toFloat()
+                val gapCount = row.size - 1
+
                 Row(
                     modifier = Modifier.fillMaxWidth().weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    horizontalArrangement = Arrangement.spacedBy(keyGap)
                 ) {
                     for (key in row) {
-                        val bg = when {
-                            key.isShift && shiftState == ShiftState.CAPS_LOCK -> keyBgShiftActive
-                            key.isShift && shiftState == ShiftState.SHIFTED -> keyBgShiftActive.copy(alpha = 0.7f)
-                            key.isMod && key.modByte == KeyboardReportSender.MOD_LCTRL && ctrlHeld -> keyBgCtrlActive
-                            key.isSpecial -> keyBgSpecial
-                            else -> keyBg
+                        val weight = key.widthUnits / totalUnits
+                        val isModActive = key.type == KeyType.MODIFIER && heldModifiers.contains(key.modByte)
+                        val isShiftKey = key.type == KeyType.SHIFT
+                        val isFnRow = row === layout.rows.firstOrNull()
+                        val isSpecialKey = key.type != KeyType.CHAR || key.widthUnits > 1.1f
+                        val isCapsKey = key.label == "Caps"
+                        val isCapsLocked = isCapsKey && shiftState == ShiftState.CAPS_LOCK
+
+                        val displayLabel = when {
+                            key.type == KeyType.MODIFIER || key.type == KeyType.SHIFT || key.type == KeyType.ACTION -> key.label
+                            key.label.isEmpty() -> ""
+                            isShifted -> key.shiftLabel
+                            else -> key.label
                         }
-                        val displayLabel = if (isShifted && !key.isSpecial && !key.isMod) key.shiftLabel else key.label
+
+                        // Press animation
+                        var pressed by remember { mutableStateOf(false) }
+                        val animScale by animateFloatAsState(
+                            targetValue = if (pressed) 0.95f else 1f,
+                            animationSpec = if (pressed) tween(15) else spring(
+                                dampingRatio = 0.4f, stiffness = Spring.StiffnessMedium
+                            ), label = "keyScale"
+                        )
+                        val animAlpha by animateFloatAsState(
+                            targetValue = if (pressed) 0.7f else 1f,
+                            animationSpec = tween(if (pressed) 15 else 150), label = "keyAlpha"
+                        )
+
+                        // Key background color
+                        val accent = Color(0xFF7C6AF6)
+                        val glassBg = Color.White.copy(alpha = 0.08f)
+                        val glassBgSpecial = Color.White.copy(alpha = 0.05f)
+                        val glassBorder = Color.White.copy(alpha = 0.12f)
+                        val accentBorder = accent.copy(alpha = 0.5f)
+
+                        val bg by animateColorAsState(
+                            targetValue = when {
+                                isShiftKey && shiftState == ShiftState.CAPS_LOCK -> accent.copy(alpha = 0.35f)
+                                isShiftKey && shiftState == ShiftState.SHIFTED -> accent.copy(alpha = 0.2f)
+                                isModActive -> accent.copy(alpha = 0.25f)
+                                isSpecialKey || isFnRow -> glassBgSpecial
+                                else -> glassBg
+                            },
+                            animationSpec = tween(100), label = "keyBg"
+                        )
+                        val borderColor = when {
+                            isModActive || (isShiftKey && isShifted) -> accentBorder
+                            else -> glassBorder
+                        }
 
                         Box(
                             modifier = Modifier
-                                .weight(key.w)
+                                .weight(weight)
                                 .fillMaxHeight()
+                                .scale(animScale)
+                                .alpha(animAlpha)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(bg)
-                                .pointerInput(key.label + key.hid) {
+                                .border(0.5.dp, borderColor, RoundedCornerShape(6.dp))
+                                .pointerInput(key.label + key.hid + key.actionId + key.modByte) {
                                     awaitEachGesture {
                                         awaitFirstDown(requireUnconsumed = false).also { it.consume() }
-                                        when {
-                                            key.isShift -> {
+                                        pressed = true
+                                        // Haptic
+                                        if (Build.VERSION.SDK_INT >= 27) {
+                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        } else {
+                                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                        }
+                                        // Key press
+                                        when (key.type) {
+                                            KeyType.SHIFT -> {
                                                 shiftState = when (shiftState) {
                                                     ShiftState.OFF -> ShiftState.SHIFTED
                                                     ShiftState.SHIFTED -> ShiftState.CAPS_LOCK
@@ -6069,42 +6163,46 @@ fun KeyboardScreen(
                                                 if (shiftState != ShiftState.OFF) keyboardEngine.pressModifier(KeyboardReportSender.MOD_LSHIFT)
                                                 else keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
                                             }
-                                            key.isMod -> {
-                                                if (key.modByte == KeyboardReportSender.MOD_LCTRL) {
-                                                    ctrlHeld = !ctrlHeld
-                                                    if (ctrlHeld) keyboardEngine.pressModifier(key.modByte)
-                                                    else keyboardEngine.releaseModifier(key.modByte)
+                                            KeyType.MODIFIER -> {
+                                                if (heldModifiers.contains(key.modByte)) {
+                                                    heldModifiers.remove(key.modByte)
+                                                    keyboardEngine.releaseModifier(key.modByte)
                                                 } else {
+                                                    heldModifiers.add(key.modByte)
                                                     keyboardEngine.pressModifier(key.modByte)
                                                 }
                                             }
-                                            key.label == "🖱" -> onSwitchToTrackpad()
-                                            else -> keyboardEngine.pressKey(key.hid)
+                                            KeyType.ACTION -> {
+                                                when (key.actionId) {
+                                                    "trackpad" -> onSwitchToTrackpad()
+                                                    "win" -> {
+                                                        keyboardEngine.pressModifier(KeyboardReportSender.MOD_LGUI)
+                                                        keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LGUI)
+                                                    }
+                                                }
+                                            }
+                                            KeyType.CHAR -> keyboardEngine.pressKey(key.hid)
                                         }
                                         // Wait for finger lift
                                         do {
                                             val ev = awaitPointerEvent()
                                             ev.changes.forEach { it.consume() }
                                         } while (ev.changes.any { it.pressed })
-                                        // Release
-                                        when {
-                                            key.isShift -> {}
-                                            key.isMod -> {
-                                                if (key.modByte != KeyboardReportSender.MOD_LCTRL) {
-                                                    keyboardEngine.releaseModifier(key.modByte)
-                                                }
-                                            }
-                                            key.label == "🖱" -> {}
-                                            else -> {
+                                        pressed = false
+                                        // Key release
+                                        when (key.type) {
+                                            KeyType.SHIFT -> {}
+                                            KeyType.MODIFIER -> {}
+                                            KeyType.ACTION -> {}
+                                            KeyType.CHAR -> {
                                                 keyboardEngine.releaseKey(key.hid)
                                                 if (shiftState == ShiftState.SHIFTED) {
                                                     shiftState = ShiftState.OFF
                                                     keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
                                                 }
-                                                if (ctrlHeld) {
-                                                    ctrlHeld = false
-                                                    keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LCTRL)
-                                                }
+                                                // Release all sticky modifiers after a char key
+                                                heldModifiers.forEach { keyboardEngine.releaseModifier(it) }
+                                                heldModifiers.clear()
                                             }
                                         }
                                     }
@@ -6113,11 +6211,31 @@ fun KeyboardScreen(
                         ) {
                             Text(
                                 text = displayLabel,
-                                color = if (key.isSpecial) keyTextDim else keyText,
-                                fontSize = if (key.label.length > 1 && !key.isShift) 10.sp else 13.sp,
+                                color = when {
+                                    isModActive || (isShiftKey && isShifted) -> Color(0xFFB8A9FB)
+                                    isSpecialKey || isFnRow -> Color(0xFF8888A0)
+                                    else -> Color(0xFFE0E0E0)
+                                },
+                                fontSize = when {
+                                    isFnRow -> 10.sp
+                                    key.label.length > 2 -> 10.sp
+                                    isSpecialKey -> 11.sp
+                                    else -> 12.sp
+                                },
                                 fontWeight = FontWeight.Medium,
                                 textAlign = TextAlign.Center
                             )
+                            // Caps Lock dot indicator
+                            if (isCapsLocked) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(4.dp)
+                                        .size(4.dp)
+                                        .clip(CircleShape)
+                                        .background(accent)
+                                )
+                            }
                         }
                     }
                 }
