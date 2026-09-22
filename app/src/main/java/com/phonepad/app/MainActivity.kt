@@ -15,6 +15,8 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.media.AudioManager
+import android.view.SoundEffectConstants
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -339,6 +341,8 @@ class MainActivity : ComponentActivity() {
         sendKeyboardReport(modifier, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5])
     }
     private var activeMode by mutableStateOf("trackpad") // trackpad, keyboard
+    private var doubleSpaceForPeriod by mutableStateOf(true)
+    private var keySoundEnabled by mutableStateOf(false)
 
     // Phase 2 trackpad surface state
     private var showGestureGuide by mutableStateOf(false)
@@ -951,7 +955,12 @@ class MainActivity : ComponentActivity() {
                                 onSwitchToTrackpad = {
                                     keyboardEngine.releaseAll()
                                     currentScreen = AppScreen.TRACKPAD
-                                }
+                                },
+                                onConsumerKey = { code -> sendConsumerKeyPress(code) },
+                                onConsumerPress = { code -> sendConsumerReport(code) },
+                                onConsumerRelease = { sendConsumerReport(0) },
+                                doubleSpaceForPeriod = doubleSpaceForPeriod,
+                                keySoundEnabled = keySoundEnabled
                             )
                         }
                     }
@@ -5930,12 +5939,12 @@ private fun GestureIllustration(type: String, dotCount: Int, accentColor: Color 
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Keyboard Layout Engine (Milestone 2.0)
+// Keyboard Layout Engine (Milestone 2.0 + 2.2 + 2.3)
 // ──────────────────────────────────────────────────────────────────────────────
 
 enum class ShiftState { OFF, SHIFTED, CAPS_LOCK }
 
-enum class KeyType { CHAR, MODIFIER, SHIFT, ACTION }
+enum class KeyType { CHAR, MODIFIER, SHIFT, ACTION, CONSUMER, FN }
 
 data class KeyDef(
     val label: String,
@@ -5944,7 +5953,12 @@ data class KeyDef(
     val widthUnits: Float = 1.0f,
     val type: KeyType = KeyType.CHAR,
     val modByte: Byte = 0,
-    val actionId: String = ""
+    val actionId: String = "",
+    val consumerCode: Int = 0,
+    val fnLabel: String = "",
+    val fnHid: Byte = 0,
+    val icon: String = "",
+    val isMediaRow: Boolean = false
 )
 
 data class KeyboardLayout(
@@ -5958,22 +5972,21 @@ object KeyboardLayouts {
 
     val FULL_QWERTY = KeyboardLayout(
         rows = listOf(
-            // Row 0: Esc + Function keys + Delete
+            // Row 0: Media/Function row (icons, shorter height)
             listOf(
-                KeyDef("Esc", "Esc", S.KEY_ESCAPE, 1.0f, KeyType.CHAR),
-                KeyDef("F1", "F1", S.KEY_F1, 1.0f, KeyType.CHAR),
-                KeyDef("F2", "F2", S.KEY_F2, 1.0f, KeyType.CHAR),
-                KeyDef("F3", "F3", S.KEY_F3, 1.0f, KeyType.CHAR),
-                KeyDef("F4", "F4", S.KEY_F4, 1.0f, KeyType.CHAR),
-                KeyDef("F5", "F5", S.KEY_F5, 1.0f, KeyType.CHAR),
-                KeyDef("F6", "F6", S.KEY_F6, 1.0f, KeyType.CHAR),
-                KeyDef("F7", "F7", S.KEY_F7, 1.0f, KeyType.CHAR),
-                KeyDef("F8", "F8", S.KEY_F8, 1.0f, KeyType.CHAR),
-                KeyDef("F9", "F9", S.KEY_F9, 1.0f, KeyType.CHAR),
-                KeyDef("F10", "F10", S.KEY_F10, 1.0f, KeyType.CHAR),
-                KeyDef("F11", "F11", S.KEY_F11, 1.0f, KeyType.CHAR),
-                KeyDef("F12", "F12", S.KEY_F12, 1.0f, KeyType.CHAR),
-                KeyDef("Del", "Del", S.KEY_DELETE, 1.0f, KeyType.CHAR)
+                KeyDef("Esc", "Esc", S.KEY_ESCAPE, 1.0f, KeyType.CHAR, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x0070, icon = "bright_down", fnLabel = "F1", fnHid = S.KEY_F1, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x006F, icon = "bright_up", fnLabel = "F2", fnHid = S.KEY_F2, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x029F, icon = "grid", fnLabel = "F3", fnHid = S.KEY_F3, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x0221, icon = "search", fnLabel = "F4", fnHid = S.KEY_F4, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x019C, icon = "mic", fnLabel = "F5", fnHid = S.KEY_F5, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00E2, icon = "mute", fnLabel = "F6", fnHid = S.KEY_F6, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00EA, icon = "vol_down", fnLabel = "F7", fnHid = S.KEY_F7, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00E9, icon = "vol_up", fnLabel = "F8", fnHid = S.KEY_F8, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00B6, icon = "skip_back", fnLabel = "F9", fnHid = S.KEY_F9, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00CD, icon = "play_pause", fnLabel = "F10", fnHid = S.KEY_F10, isMediaRow = true),
+                KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00B5, icon = "skip_fwd", fnLabel = "F11", fnHid = S.KEY_F11, isMediaRow = true),
+                KeyDef("Del", "Del", S.KEY_DELETE, 1.0f, KeyType.CHAR, fnLabel = "F12", fnHid = S.KEY_F12, isMediaRow = true)
             ),
             // Row 1: Number row
             listOf(
@@ -6020,10 +6033,11 @@ object KeyboardLayouts {
             ),
             // Row 5: Space row
             listOf(
-                KeyDef("Ctrl", "Ctrl", 0, 1.5f, KeyType.MODIFIER, S.MOD_LCTRL),
+                KeyDef("Fn", "Fn", 0, 1.0f, KeyType.FN),
+                KeyDef("Ctrl", "Ctrl", 0, 1.3f, KeyType.MODIFIER, S.MOD_LCTRL),
                 KeyDef("Win", "Win", 0, 1.0f, KeyType.ACTION, actionId = "win"),
                 KeyDef("Alt", "Alt", 0, 1.2f, KeyType.MODIFIER, S.MOD_LALT),
-                KeyDef("", "", S.KEY_SPACE, 6.0f, KeyType.CHAR),
+                KeyDef("", "", S.KEY_SPACE, 5.5f, KeyType.CHAR),
                 KeyDef("Alt", "Alt", 0, 1.0f, KeyType.MODIFIER, S.MOD_RALT),
                 KeyDef("←", "←", S.KEY_ARROW_LEFT),
                 KeyDef("↑", "↑", S.KEY_ARROW_UP),
@@ -6036,18 +6050,121 @@ object KeyboardLayouts {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Keyboard Rendering Engine (Milestone 2.0 + 2.1)
+// Keyboard Rendering Engine (Milestone 2.0–2.3)
 // ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun MediaKeyIcon(icon: String, tint: Color, size: Float = 14f) {
+    val sizeDp = size.dp
+    Canvas(modifier = Modifier.size(sizeDp)) {
+        val c = this.size / 2f
+        val cx = c.width; val cy = c.height
+        val s = this.size.minDimension
+        val stroke = Stroke(width = 1.4f * (s / 40f), cap = StrokeCap.Round)
+        when (icon) {
+            "bright_down" -> {
+                drawCircle(tint, s * 0.18f, center = Offset(cx, cy), style = stroke)
+                val rayLen = s * 0.15f; val gap = s * 0.28f
+                for (i in 0 until 8) {
+                    val a = Math.toRadians(i * 45.0)
+                    drawLine(tint, Offset(cx + (gap * cos(a)).toFloat(), cy + (gap * sin(a)).toFloat()),
+                        Offset(cx + ((gap + rayLen) * cos(a)).toFloat(), cy + ((gap + rayLen) * sin(a)).toFloat()), strokeWidth = stroke.width)
+                }
+            }
+            "bright_up" -> {
+                drawCircle(tint, s * 0.22f, center = Offset(cx, cy), style = stroke)
+                val rayLen = s * 0.18f; val gap = s * 0.32f
+                for (i in 0 until 8) {
+                    val a = Math.toRadians(i * 45.0)
+                    drawLine(tint, Offset(cx + (gap * cos(a)).toFloat(), cy + (gap * sin(a)).toFloat()),
+                        Offset(cx + ((gap + rayLen) * cos(a)).toFloat(), cy + ((gap + rayLen) * sin(a)).toFloat()), strokeWidth = stroke.width)
+                }
+            }
+            "grid" -> {
+                val d = s * 0.12f; val sp = s * 0.32f
+                for (r in -1..1) for (col in -1..1) drawCircle(tint, d, Offset(cx + col * sp, cy + r * sp))
+            }
+            "search" -> {
+                drawCircle(tint, s * 0.22f, Offset(cx - s * 0.05f, cy - s * 0.05f), style = stroke)
+                drawLine(tint, Offset(cx + s * 0.12f, cy + s * 0.12f), Offset(cx + s * 0.35f, cy + s * 0.35f), strokeWidth = stroke.width * 1.3f)
+            }
+            "mic" -> {
+                val mw = s * 0.15f; val mh = s * 0.25f
+                drawRoundRect(tint, Offset(cx - mw, cy - mh - s * 0.05f), androidx.compose.ui.geometry.Size(mw * 2, mh * 2), CornerRadius(mw), style = stroke)
+                drawArc(tint, 0f, 180f, false, Offset(cx - s * 0.22f, cy - s * 0.15f), androidx.compose.ui.geometry.Size(s * 0.44f, s * 0.44f), style = stroke)
+                drawLine(tint, Offset(cx, cy + s * 0.3f), Offset(cx, cy + s * 0.42f), strokeWidth = stroke.width)
+            }
+            "mute" -> {
+                val bx = cx - s * 0.15f
+                drawRect(tint, Offset(bx - s * 0.08f, cy - s * 0.1f), androidx.compose.ui.geometry.Size(s * 0.16f, s * 0.2f))
+                val path = Path().apply {
+                    moveTo(bx + s * 0.08f, cy - s * 0.1f); lineTo(bx + s * 0.3f, cy - s * 0.3f)
+                    lineTo(bx + s * 0.3f, cy + s * 0.3f); lineTo(bx + s * 0.08f, cy + s * 0.1f); close()
+                }
+                drawPath(path, tint)
+                drawLine(tint, Offset(cx + s * 0.15f, cy - s * 0.15f), Offset(cx + s * 0.35f, cy + s * 0.15f), strokeWidth = stroke.width * 1.2f)
+                drawLine(tint, Offset(cx + s * 0.35f, cy - s * 0.15f), Offset(cx + s * 0.15f, cy + s * 0.15f), strokeWidth = stroke.width * 1.2f)
+            }
+            "vol_down" -> {
+                val bx = cx - s * 0.1f
+                drawRect(tint, Offset(bx - s * 0.08f, cy - s * 0.1f), androidx.compose.ui.geometry.Size(s * 0.16f, s * 0.2f))
+                val path = Path().apply {
+                    moveTo(bx + s * 0.08f, cy - s * 0.1f); lineTo(bx + s * 0.25f, cy - s * 0.25f)
+                    lineTo(bx + s * 0.25f, cy + s * 0.25f); lineTo(bx + s * 0.08f, cy + s * 0.1f); close()
+                }
+                drawPath(path, tint)
+                drawArc(tint, -40f, 80f, false, Offset(cx + s * 0.05f, cy - s * 0.15f), androidx.compose.ui.geometry.Size(s * 0.2f, s * 0.3f), style = stroke)
+            }
+            "vol_up" -> {
+                val bx = cx - s * 0.15f
+                drawRect(tint, Offset(bx - s * 0.08f, cy - s * 0.1f), androidx.compose.ui.geometry.Size(s * 0.16f, s * 0.2f))
+                val path = Path().apply {
+                    moveTo(bx + s * 0.08f, cy - s * 0.1f); lineTo(bx + s * 0.25f, cy - s * 0.25f)
+                    lineTo(bx + s * 0.25f, cy + s * 0.25f); lineTo(bx + s * 0.08f, cy + s * 0.1f); close()
+                }
+                drawPath(path, tint)
+                drawArc(tint, -40f, 80f, false, Offset(cx + s * 0.02f, cy - s * 0.15f), androidx.compose.ui.geometry.Size(s * 0.2f, s * 0.3f), style = stroke)
+                drawArc(tint, -45f, 90f, false, Offset(cx + s * 0.08f, cy - s * 0.25f), androidx.compose.ui.geometry.Size(s * 0.3f, s * 0.5f), style = stroke)
+            }
+            "skip_back" -> {
+                drawLine(tint, Offset(cx - s * 0.3f, cy - s * 0.2f), Offset(cx - s * 0.3f, cy + s * 0.2f), strokeWidth = stroke.width * 1.2f)
+                val p = Path().apply { moveTo(cx - s * 0.2f, cy); lineTo(cx + s * 0.05f, cy - s * 0.2f); lineTo(cx + s * 0.05f, cy + s * 0.2f); close() }
+                drawPath(p, tint)
+                val p2 = Path().apply { moveTo(cx + s * 0.05f, cy); lineTo(cx + s * 0.3f, cy - s * 0.2f); lineTo(cx + s * 0.3f, cy + s * 0.2f); close() }
+                drawPath(p2, tint)
+            }
+            "play_pause" -> {
+                val p = Path().apply { moveTo(cx - s * 0.2f, cy - s * 0.22f); lineTo(cx + s * 0.05f, cy); lineTo(cx - s * 0.2f, cy + s * 0.22f); close() }
+                drawPath(p, tint)
+                drawLine(tint, Offset(cx + s * 0.15f, cy - s * 0.2f), Offset(cx + s * 0.15f, cy + s * 0.2f), strokeWidth = stroke.width * 1.5f)
+                drawLine(tint, Offset(cx + s * 0.28f, cy - s * 0.2f), Offset(cx + s * 0.28f, cy + s * 0.2f), strokeWidth = stroke.width * 1.5f)
+            }
+            "skip_fwd" -> {
+                val p = Path().apply { moveTo(cx - s * 0.3f, cy - s * 0.2f); lineTo(cx - s * 0.05f, cy); lineTo(cx - s * 0.3f, cy + s * 0.2f); close() }
+                drawPath(p, tint)
+                val p2 = Path().apply { moveTo(cx - s * 0.05f, cy - s * 0.2f); lineTo(cx + s * 0.2f, cy); lineTo(cx - s * 0.05f, cy + s * 0.2f); close() }
+                drawPath(p2, tint)
+                drawLine(tint, Offset(cx + s * 0.3f, cy - s * 0.2f), Offset(cx + s * 0.3f, cy + s * 0.2f), strokeWidth = stroke.width * 1.2f)
+            }
+        }
+    }
+}
 
 @Composable
 fun KeyboardScreen(
     keyboardEngine: KeyboardReportSender,
     onSwitchToTrackpad: () -> Unit,
+    onConsumerKey: (Int) -> Unit = {},
+    onConsumerPress: (Int) -> Unit = {},
+    onConsumerRelease: () -> Unit = {},
+    doubleSpaceForPeriod: Boolean = true,
+    keySoundEnabled: Boolean = false,
     layout: KeyboardLayout = KeyboardLayouts.FULL_QWERTY
 ) {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
     val view = LocalView.current
+    val handler = remember { Handler(Looper.getMainLooper()) }
 
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -6059,10 +6176,23 @@ fun KeyboardScreen(
     var shiftState by remember { mutableStateOf(ShiftState.OFF) }
     val heldModifiers = remember { mutableStateListOf<Byte>() }
     val isShifted = shiftState != ShiftState.OFF
+    var fnHeld by remember { mutableStateOf(false) }
+    var lastSpaceTime by remember { mutableStateOf(0L) }
 
     val surfaceBg = Color(0xFF08080D)
     val keyGap = layout.keyGapDp.dp
     val rowGap = layout.rowGapDp.dp
+    val accent = Color(0xFF7C6AF6)
+
+    fun doHaptic() {
+        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
+    fun doSound() {
+        if (keySoundEnabled) {
+            view.playSoundEffect(SoundEffectConstants.CLICK)
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -6074,45 +6204,49 @@ fun KeyboardScreen(
             modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp),
             verticalArrangement = Arrangement.spacedBy(rowGap)
         ) {
-            for (row in layout.rows) {
+            for ((rowIdx, row) in layout.rows.withIndex()) {
                 val totalUnits = row.sumOf { it.widthUnits.toDouble() }.toFloat()
-                val gapCount = row.size - 1
+                val isMediaRow = row.any { it.isMediaRow }
+                val rowWeight = if (isMediaRow) 0.7f else 1f
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    modifier = Modifier.fillMaxWidth().weight(rowWeight),
                     horizontalArrangement = Arrangement.spacedBy(keyGap)
                 ) {
                     for (key in row) {
                         val weight = key.widthUnits / totalUnits
                         val isModActive = key.type == KeyType.MODIFIER && heldModifiers.contains(key.modByte)
                         val isShiftKey = key.type == KeyType.SHIFT
-                        val isFnRow = row === layout.rows.firstOrNull()
+                        val isFnKey = key.type == KeyType.FN
                         val isSpecialKey = key.type != KeyType.CHAR || key.widthUnits > 1.1f
                         val isCapsKey = key.label == "Caps"
                         val isCapsLocked = isCapsKey && shiftState == ShiftState.CAPS_LOCK
+                        val isBackspace = key.hid == KeyboardReportSender.KEY_BACKSPACE
+                        val isSpace = key.hid == KeyboardReportSender.KEY_SPACE
+                        val isConsumer = key.type == KeyType.CONSUMER
+                        val isVolumeKey = isConsumer && (key.consumerCode == 0x00E9 || key.consumerCode == 0x00EA)
 
+                        val showFnLabel = fnHeld && key.fnLabel.isNotEmpty()
                         val displayLabel = when {
-                            key.type == KeyType.MODIFIER || key.type == KeyType.SHIFT || key.type == KeyType.ACTION -> key.label
+                            showFnLabel -> key.fnLabel
+                            key.type == KeyType.MODIFIER || key.type == KeyType.SHIFT || key.type == KeyType.ACTION || key.type == KeyType.FN -> key.label
+                            isConsumer && key.label.isEmpty() -> ""
                             key.label.isEmpty() -> ""
                             isShifted -> key.shiftLabel
                             else -> key.label
                         }
 
-                        // Press animation
                         var pressed by remember { mutableStateOf(false) }
                         val animScale by animateFloatAsState(
                             targetValue = if (pressed) 0.95f else 1f,
-                            animationSpec = if (pressed) tween(15) else spring(
-                                dampingRatio = 0.4f, stiffness = Spring.StiffnessMedium
-                            ), label = "keyScale"
+                            animationSpec = if (pressed) tween(15) else spring(dampingRatio = 0.4f, stiffness = Spring.StiffnessMedium),
+                            label = "s"
                         )
                         val animAlpha by animateFloatAsState(
                             targetValue = if (pressed) 0.7f else 1f,
-                            animationSpec = tween(if (pressed) 15 else 150), label = "keyAlpha"
+                            animationSpec = tween(if (pressed) 15 else 150), label = "a"
                         )
 
-                        // Key background color
-                        val accent = Color(0xFF7C6AF6)
                         val glassBg = Color.White.copy(alpha = 0.08f)
                         val glassBgSpecial = Color.White.copy(alpha = 0.05f)
                         val glassBorder = Color.White.copy(alpha = 0.12f)
@@ -6123,13 +6257,14 @@ fun KeyboardScreen(
                                 isShiftKey && shiftState == ShiftState.CAPS_LOCK -> accent.copy(alpha = 0.35f)
                                 isShiftKey && shiftState == ShiftState.SHIFTED -> accent.copy(alpha = 0.2f)
                                 isModActive -> accent.copy(alpha = 0.25f)
-                                isSpecialKey || isFnRow -> glassBgSpecial
+                                isFnKey && fnHeld -> accent.copy(alpha = 0.25f)
+                                isSpecialKey || isMediaRow || isConsumer || isFnKey -> glassBgSpecial
                                 else -> glassBg
                             },
-                            animationSpec = tween(100), label = "keyBg"
+                            animationSpec = tween(100), label = "bg"
                         )
                         val borderColor = when {
-                            isModActive || (isShiftKey && isShifted) -> accentBorder
+                            isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accentBorder
                             else -> glassBorder
                         }
 
@@ -6142,19 +6277,18 @@ fun KeyboardScreen(
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(bg)
                                 .border(0.5.dp, borderColor, RoundedCornerShape(6.dp))
-                                .pointerInput(key.label + key.hid + key.actionId + key.modByte) {
+                                .pointerInput(key.label + key.hid + key.actionId + key.modByte + key.consumerCode + key.icon) {
                                     awaitEachGesture {
                                         awaitFirstDown(requireUnconsumed = false).also { it.consume() }
                                         pressed = true
-                                        // Haptic
-                                        if (Build.VERSION.SDK_INT >= 27) {
-                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                        } else {
-                                            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                        }
-                                        // Key press
-                                        when (key.type) {
-                                            KeyType.SHIFT -> {
+                                        doHaptic()
+                                        doSound()
+
+                                        val pressTime = SystemClock.uptimeMillis()
+                                        var repeatRunnable: Runnable? = null
+
+                                        when {
+                                            key.type == KeyType.SHIFT -> {
                                                 shiftState = when (shiftState) {
                                                     ShiftState.OFF -> ShiftState.SHIFTED
                                                     ShiftState.SHIFTED -> ShiftState.CAPS_LOCK
@@ -6163,7 +6297,7 @@ fun KeyboardScreen(
                                                 if (shiftState != ShiftState.OFF) keyboardEngine.pressModifier(KeyboardReportSender.MOD_LSHIFT)
                                                 else keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
                                             }
-                                            KeyType.MODIFIER -> {
+                                            key.type == KeyType.MODIFIER -> {
                                                 if (heldModifiers.contains(key.modByte)) {
                                                     heldModifiers.remove(key.modByte)
                                                     keyboardEngine.releaseModifier(key.modByte)
@@ -6172,7 +6306,8 @@ fun KeyboardScreen(
                                                     keyboardEngine.pressModifier(key.modByte)
                                                 }
                                             }
-                                            KeyType.ACTION -> {
+                                            key.type == KeyType.FN -> fnHeld = !fnHeld
+                                            key.type == KeyType.ACTION -> {
                                                 when (key.actionId) {
                                                     "trackpad" -> onSwitchToTrackpad()
                                                     "win" -> {
@@ -6181,26 +6316,82 @@ fun KeyboardScreen(
                                                     }
                                                 }
                                             }
-                                            KeyType.CHAR -> keyboardEngine.pressKey(key.hid)
+                                            isConsumer && !fnHeld -> {
+                                                onConsumerPress(key.consumerCode)
+                                                if (isVolumeKey) {
+                                                    val rr = object : Runnable {
+                                                        override fun run() {
+                                                            onConsumerRelease()
+                                                            onConsumerPress(key.consumerCode)
+                                                            handler.postDelayed(this, 100)
+                                                        }
+                                                    }
+                                                    repeatRunnable = rr
+                                                    handler.postDelayed(rr, 400)
+                                                }
+                                            }
+                                            isConsumer && fnHeld && key.fnHid != 0.toByte() -> {
+                                                keyboardEngine.pressKey(key.fnHid)
+                                            }
+                                            isBackspace -> {
+                                                keyboardEngine.pressKey(key.hid)
+                                                // Accelerating repeat: 250ms initial, ramp from 50ms to 33ms
+                                                val bsRunnable = object : Runnable {
+                                                    var count = 0
+                                                    override fun run() {
+                                                        keyboardEngine.releaseKey(key.hid)
+                                                        keyboardEngine.pressKey(key.hid)
+                                                        count++
+                                                        val interval = when {
+                                                            count < 8 -> 250L / (count + 1)  // ~250→31ms over 8 steps
+                                                            else -> 33L
+                                                        }.coerceIn(33L, 250L)
+                                                        handler.postDelayed(this, interval)
+                                                    }
+                                                }
+                                                repeatRunnable = bsRunnable
+                                                handler.postDelayed(bsRunnable, 500)
+                                            }
+                                            isSpace -> {
+                                                val now = SystemClock.uptimeMillis()
+                                                if (doubleSpaceForPeriod && (now - lastSpaceTime) < 400) {
+                                                    keyboardEngine.pressKey(KeyboardReportSender.KEY_BACKSPACE)
+                                                    keyboardEngine.releaseKey(KeyboardReportSender.KEY_BACKSPACE)
+                                                    keyboardEngine.pressKey(KeyboardReportSender.KEY_PERIOD)
+                                                    keyboardEngine.releaseKey(KeyboardReportSender.KEY_PERIOD)
+                                                    keyboardEngine.pressKey(KeyboardReportSender.KEY_SPACE)
+                                                    lastSpaceTime = 0L
+                                                } else {
+                                                    keyboardEngine.pressKey(key.hid)
+                                                    lastSpaceTime = now
+                                                }
+                                            }
+                                            else -> keyboardEngine.pressKey(key.hid)
                                         }
+
                                         // Wait for finger lift
                                         do {
                                             val ev = awaitPointerEvent()
                                             ev.changes.forEach { it.consume() }
                                         } while (ev.changes.any { it.pressed })
                                         pressed = false
-                                        // Key release
-                                        when (key.type) {
-                                            KeyType.SHIFT -> {}
-                                            KeyType.MODIFIER -> {}
-                                            KeyType.ACTION -> {}
-                                            KeyType.CHAR -> {
+
+                                        // Cancel any repeat
+                                        repeatRunnable?.let { handler.removeCallbacks(it) }
+
+                                        // Release
+                                        when {
+                                            key.type == KeyType.SHIFT || key.type == KeyType.MODIFIER || key.type == KeyType.FN || key.type == KeyType.ACTION -> {}
+                                            isConsumer && !fnHeld -> onConsumerRelease()
+                                            isConsumer && fnHeld && key.fnHid != 0.toByte() -> {
+                                                keyboardEngine.releaseKey(key.fnHid)
+                                            }
+                                            else -> {
                                                 keyboardEngine.releaseKey(key.hid)
                                                 if (shiftState == ShiftState.SHIFTED) {
                                                     shiftState = ShiftState.OFF
                                                     keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
                                                 }
-                                                // Release all sticky modifiers after a char key
                                                 heldModifiers.forEach { keyboardEngine.releaseModifier(it) }
                                                 heldModifiers.clear()
                                             }
@@ -6209,23 +6400,31 @@ fun KeyboardScreen(
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = displayLabel,
-                                color = when {
-                                    isModActive || (isShiftKey && isShifted) -> Color(0xFFB8A9FB)
-                                    isSpecialKey || isFnRow -> Color(0xFF8888A0)
-                                    else -> Color(0xFFE0E0E0)
-                                },
-                                fontSize = when {
-                                    isFnRow -> 10.sp
-                                    key.label.length > 2 -> 10.sp
-                                    isSpecialKey -> 11.sp
-                                    else -> 12.sp
-                                },
-                                fontWeight = FontWeight.Medium,
-                                textAlign = TextAlign.Center
-                            )
-                            // Caps Lock dot indicator
+                            // Render icon or text
+                            if (key.icon.isNotEmpty() && !showFnLabel) {
+                                MediaKeyIcon(
+                                    icon = key.icon,
+                                    tint = Color(0xFF8888A0),
+                                    size = if (isMediaRow) 14f else 12f
+                                )
+                            } else {
+                                Text(
+                                    text = displayLabel,
+                                    color = when {
+                                        isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> Color(0xFFB8A9FB)
+                                        isSpecialKey || isMediaRow || isConsumer || isFnKey -> Color(0xFF8888A0)
+                                        else -> Color(0xFFE0E0E0)
+                                    },
+                                    fontSize = when {
+                                        isMediaRow || showFnLabel -> 10.sp
+                                        key.label.length > 2 -> 10.sp
+                                        isSpecialKey -> 11.sp
+                                        else -> 12.sp
+                                    },
+                                    fontWeight = FontWeight.Medium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                             if (isCapsLocked) {
                                 Box(
                                     modifier = Modifier
