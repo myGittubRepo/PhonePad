@@ -98,6 +98,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
@@ -176,6 +177,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.animation.core.EaseInOutCubic
 import androidx.compose.animation.core.EaseOutBack
@@ -192,7 +194,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 enum class AppScreen {
-    SPLASH, COMPAT_FAIL, ONBOARDING, PERMISSION, PERMISSION_DENIED, PAIRING_GUIDE, TRACKPAD, KEYBOARD
+    SPLASH, COMPAT_FAIL, ONBOARDING, PERMISSION, PERMISSION_DENIED, PAIRING_GUIDE, TRACKPAD, KEYBOARD, SPLIT
 }
 
 class MainActivity : ComponentActivity() {
@@ -213,6 +215,7 @@ class MainActivity : ComponentActivity() {
         private const val PREF_TRACKPAD_THEME = "trackpad_theme"
         private const val PREF_UI_THEME = "ui_theme"
         private const val PREF_DEVICE_NICKNAME = "_nickname"
+        private const val PREF_SPLIT_RATIO = "_split_ratio"
         private const val PREF_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
         private const val PREF_GESTURE_GUIDE_SECTIONS = "gesture_guide_sections"
 
@@ -340,7 +343,7 @@ class MainActivity : ComponentActivity() {
     private val keyboardEngine = KeyboardReportSender { modifier, keys ->
         sendKeyboardReport(modifier, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5])
     }
-    private var activeMode by mutableStateOf("trackpad") // trackpad, keyboard
+    private var activeMode by mutableStateOf("trackpad") // trackpad, keyboard, split
     private var doubleSpaceForPeriod by mutableStateOf(true)
     private var keySoundEnabled by mutableStateOf(false)
 
@@ -357,7 +360,7 @@ class MainActivity : ComponentActivity() {
     private var showDisconnectSheet by mutableStateOf(false)
     private var disconnectAutoReconnectFailed by mutableStateOf(false)
     private val disconnectTimerRunnable = Runnable {
-        if (connectedDevice == null && currentScreen == AppScreen.TRACKPAD) {
+        if (connectedDevice == null && (currentScreen == AppScreen.TRACKPAD || currentScreen == AppScreen.SPLIT)) {
             disconnectAutoReconnectFailed = true
             showDisconnectSheet = true
         }
@@ -631,7 +634,7 @@ class MainActivity : ComponentActivity() {
                     resetWheelMultiplier()
                     val wasConnected = connectedDevice != null
                     connectedDevice = null
-                    if (wasConnected && currentScreen == AppScreen.TRACKPAD) {
+                    if (wasConnected && (currentScreen == AppScreen.TRACKPAD || currentScreen == AppScreen.SPLIT)) {
                         disconnectAutoReconnectFailed = false
                         autoReconnectAttempted = false
                         handler.postDelayed(disconnectTimerRunnable, AUTO_RECONNECT_TIMEOUT_MS)
@@ -947,6 +950,17 @@ class MainActivity : ComponentActivity() {
                                         ) {
                                             Text("⌨", fontSize = 20.sp)
                                         }
+                                        // Switch to split mode
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF4B9EE8))
+                                                .clickable { currentScreen = AppScreen.SPLIT },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("⊞", fontSize = 20.sp, color = Color.White)
+                                        }
                                     }
                                 }
                             }
@@ -961,6 +975,63 @@ class MainActivity : ComponentActivity() {
                                 onConsumerRelease = { sendConsumerReport(0) },
                                 doubleSpaceForPeriod = doubleSpaceForPeriod,
                                 keySoundEnabled = keySoundEnabled
+                            )
+                            AppScreen.SPLIT -> SplitScreen(
+                                trackpadContent = { mod ->
+                                    Box(modifier = mod) {
+                                        // Touch surface layer (behind everything)
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    when (trackpadTheme) {
+                                                        "darker" -> Color(0xFF050508)
+                                                        "amoled" -> Color.Black
+                                                        else -> Color(0xFF111118)
+                                                    }
+                                                )
+                                                .then(
+                                                    if (connectedDevice != null) {
+                                                        Modifier.pointerInteropFilter { event ->
+                                                            handleTrackpadTouch(event)
+                                                        }
+                                                    } else Modifier
+                                                )
+                                        ) {
+                                            if (connectedDevice == null) {
+                                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                    Text("Not connected", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp)
+                                                }
+                                            }
+                                        }
+                                        // Back button (on top, intercepts before trackpad)
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(8.dp)
+                                                .size(32.dp)
+                                                .clip(CircleShape)
+                                                .background(Color.White.copy(alpha = 0.08f))
+                                                .clickable {
+                                                    keyboardEngine.releaseAll()
+                                                    currentScreen = AppScreen.TRACKPAD
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("◀", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
+                                        }
+                                    }
+                                },
+                                keyboardContent = { mod ->
+                                    CompactKeyboardScreen(
+                                        keyboardEngine = keyboardEngine,
+                                        onConsumerPress = { code -> sendConsumerReport(code) },
+                                        onConsumerRelease = { sendConsumerReport(0) },
+                                        doubleSpaceForPeriod = doubleSpaceForPeriod,
+                                        keySoundEnabled = keySoundEnabled,
+                                        modifier = mod
+                                    )
+                                }
                             )
                         }
                     }
@@ -5958,7 +6029,10 @@ data class KeyDef(
     val fnLabel: String = "",
     val fnHid: Byte = 0,
     val icon: String = "",
-    val isMediaRow: Boolean = false
+    val isMediaRow: Boolean = false,
+    val altLabel: String = "",
+    val altHid: Byte = 0,
+    val autoShift: Boolean = false
 )
 
 data class KeyboardLayout(
@@ -5969,6 +6043,116 @@ data class KeyboardLayout(
 
 object KeyboardLayouts {
     private val S = KeyboardReportSender
+
+    // Media strip shared by both compact layouts
+    private val COMPACT_MEDIA_ROW = listOf(
+        KeyDef("Esc", "Esc", S.KEY_ESCAPE, 1.0f, KeyType.CHAR, isMediaRow = true),
+        KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x0070, icon = "bright_down", fnLabel = "F1", fnHid = S.KEY_F1, isMediaRow = true),
+        KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x006F, icon = "bright_up", fnLabel = "F2", fnHid = S.KEY_F2, isMediaRow = true),
+        KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00E2, icon = "mute", fnLabel = "F3", fnHid = S.KEY_F3, isMediaRow = true),
+        KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00EA, icon = "vol_down", fnLabel = "F4", fnHid = S.KEY_F4, isMediaRow = true),
+        KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00E9, icon = "vol_up", fnLabel = "F5", fnHid = S.KEY_F5, isMediaRow = true),
+        KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00B6, icon = "skip_back", fnLabel = "F6", fnHid = S.KEY_F6, isMediaRow = true),
+        KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00CD, icon = "play_pause", fnLabel = "F7", fnHid = S.KEY_F7, isMediaRow = true),
+        KeyDef("", "", 0, 1.0f, KeyType.CONSUMER, consumerCode = 0x00B5, icon = "skip_fwd", fnLabel = "F8", fnHid = S.KEY_F8, isMediaRow = true)
+    )
+
+    val COMPACT_QWERTY = KeyboardLayout(
+        rows = listOf(
+            // Row 0: Media strip
+            COMPACT_MEDIA_ROW,
+            // Row 1: QWERTY (long-press = numbers Q=1..P=0)
+            listOf(
+                KeyDef("q", "Q", S.KEY_Q, altLabel = "1", altHid = S.KEY_1),
+                KeyDef("w", "W", S.KEY_W, altLabel = "2", altHid = S.KEY_2),
+                KeyDef("e", "E", S.KEY_E, altLabel = "3", altHid = S.KEY_3),
+                KeyDef("r", "R", S.KEY_R, altLabel = "4", altHid = S.KEY_4),
+                KeyDef("t", "T", S.KEY_T, altLabel = "5", altHid = S.KEY_5),
+                KeyDef("y", "Y", S.KEY_Y, altLabel = "6", altHid = S.KEY_6),
+                KeyDef("u", "U", S.KEY_U, altLabel = "7", altHid = S.KEY_7),
+                KeyDef("i", "I", S.KEY_I, altLabel = "8", altHid = S.KEY_8),
+                KeyDef("o", "O", S.KEY_O, altLabel = "9", altHid = S.KEY_9),
+                KeyDef("p", "P", S.KEY_P, altLabel = "0", altHid = S.KEY_0)
+            ),
+            // Row 1: ASDF row
+            listOf(
+                KeyDef("a", "A", S.KEY_A), KeyDef("s", "S", S.KEY_S),
+                KeyDef("d", "D", S.KEY_D), KeyDef("f", "F", S.KEY_F),
+                KeyDef("g", "G", S.KEY_G), KeyDef("h", "H", S.KEY_H),
+                KeyDef("j", "J", S.KEY_J), KeyDef("k", "K", S.KEY_K),
+                KeyDef("l", "L", S.KEY_L)
+            ),
+            // Row 2: ZXCV row
+            listOf(
+                KeyDef("⇧", "⇧", 0, 1.3f, KeyType.SHIFT),
+                KeyDef("z", "Z", S.KEY_Z), KeyDef("x", "X", S.KEY_X),
+                KeyDef("c", "C", S.KEY_C), KeyDef("v", "V", S.KEY_V),
+                KeyDef("b", "B", S.KEY_B), KeyDef("n", "N", S.KEY_N),
+                KeyDef("m", "M", S.KEY_M),
+                KeyDef("⌫", "⌫", S.KEY_BACKSPACE, 1.3f, KeyType.CHAR)
+            ),
+            // Row 3: Bottom modifiers
+            listOf(
+                KeyDef("Fn", "Fn", 0, 1.2f, KeyType.FN),
+                KeyDef("Ctrl", "Ctrl", 0, 1.2f, KeyType.MODIFIER, S.MOD_LCTRL),
+                KeyDef("Alt", "Alt", 0, 1.0f, KeyType.MODIFIER, S.MOD_LALT),
+                KeyDef("", "", S.KEY_SPACE, 3.0f, KeyType.CHAR),
+                KeyDef(".", ">", S.KEY_PERIOD, 1.0f),
+                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.6f, KeyType.CHAR)
+            )
+        ),
+        keyGapDp = 1.5f,
+        rowGapDp = 2f
+    )
+
+    // Symbol layer for compact mode: same row structure, different labels
+    val COMPACT_SYMBOLS = KeyboardLayout(
+        rows = listOf(
+            // Row 0: Media strip (same)
+            COMPACT_MEDIA_ROW,
+            // Row 1: Symbols (shift+number)
+            listOf(
+                KeyDef("!", "!", S.KEY_1, autoShift = true),
+                KeyDef("@", "@", S.KEY_2, autoShift = true),
+                KeyDef("#", "#", S.KEY_3, autoShift = true),
+                KeyDef("$", "$", S.KEY_4, autoShift = true),
+                KeyDef("%", "%", S.KEY_5, autoShift = true),
+                KeyDef("^", "^", S.KEY_6, autoShift = true),
+                KeyDef("&", "&", S.KEY_7, autoShift = true),
+                KeyDef("*", "*", S.KEY_8, autoShift = true),
+                KeyDef("(", "(", S.KEY_9, autoShift = true),
+                KeyDef(")", ")", S.KEY_0, autoShift = true)
+            ),
+            // Row 1: More symbols
+            listOf(
+                KeyDef("-", "_", S.KEY_MINUS), KeyDef("=", "+", S.KEY_EQUALS),
+                KeyDef("[", "{", S.KEY_LBRACKET), KeyDef("]", "}", S.KEY_RBRACKET),
+                KeyDef("\\", "|", S.KEY_BACKSLASH), KeyDef(";", ":", S.KEY_SEMICOLON),
+                KeyDef("'", "\"", S.KEY_APOSTROPHE), KeyDef(",", "<", S.KEY_COMMA),
+                KeyDef("/", "?", S.KEY_SLASH)
+            ),
+            // Row 2: Grave, Tab, Esc, arrows + Backspace
+            listOf(
+                KeyDef("⇧", "⇧", 0, 1.3f, KeyType.SHIFT),
+                KeyDef("`", "~", S.KEY_GRAVE), KeyDef("Tab", "Tab", S.KEY_TAB),
+                KeyDef("Esc", "Esc", S.KEY_ESCAPE),
+                KeyDef("←", "←", S.KEY_ARROW_LEFT), KeyDef("↑", "↑", S.KEY_ARROW_UP),
+                KeyDef("↓", "↓", S.KEY_ARROW_DOWN), KeyDef("→", "→", S.KEY_ARROW_RIGHT),
+                KeyDef("⌫", "⌫", S.KEY_BACKSPACE, 1.3f, KeyType.CHAR)
+            ),
+            // Row 3: Same modifiers
+            listOf(
+                KeyDef("Fn", "Fn", 0, 1.2f, KeyType.FN),
+                KeyDef("Ctrl", "Ctrl", 0, 1.2f, KeyType.MODIFIER, S.MOD_LCTRL),
+                KeyDef("Alt", "Alt", 0, 1.0f, KeyType.MODIFIER, S.MOD_LALT),
+                KeyDef("", "", S.KEY_SPACE, 3.0f, KeyType.CHAR),
+                KeyDef(".", ">", S.KEY_PERIOD, 1.0f),
+                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.6f, KeyType.CHAR)
+            )
+        ),
+        keyGapDp = 1.5f,
+        rowGapDp = 2f
+    )
 
     val FULL_QWERTY = KeyboardLayout(
         rows = listOf(
@@ -6440,5 +6624,397 @@ fun KeyboardScreen(
                 }
             }
         }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Compact Keyboard for Split Mode (Milestone 3.1)
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CompactKeyboardScreen(
+    keyboardEngine: KeyboardReportSender,
+    onConsumerPress: (Int) -> Unit = {},
+    onConsumerRelease: () -> Unit = {},
+    doubleSpaceForPeriod: Boolean = true,
+    keySoundEnabled: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val view = LocalView.current
+    val handler = remember { Handler(Looper.getMainLooper()) }
+
+    var shiftState by remember { mutableStateOf(ShiftState.OFF) }
+    val heldModifiers = remember { mutableStateListOf<Byte>() }
+    val isShifted = shiftState != ShiftState.OFF
+    var fnHeld by remember { mutableStateOf(false) }
+    var lastSpaceTime by remember { mutableStateOf(0L) }
+    var popupKey by remember { mutableStateOf<KeyDef?>(null) }
+    var popupOffset by remember { mutableStateOf(Offset.Zero) }
+
+    val activeLayout = if (fnHeld) KeyboardLayouts.COMPACT_SYMBOLS else KeyboardLayouts.COMPACT_QWERTY
+    val accent = Color(0xFF7C6AF6)
+    val surfaceBg = Color(0xFF08080D)
+
+    fun doHaptic() {
+        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+    fun doSound() {
+        if (keySoundEnabled) view.playSoundEffect(SoundEffectConstants.CLICK)
+    }
+
+    Box(modifier = modifier.fillMaxSize().background(surfaceBg)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 2.dp, vertical = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(activeLayout.rowGapDp.dp)
+        ) {
+            for (row in activeLayout.rows) {
+                val totalUnits = row.sumOf { it.widthUnits.toDouble() }.toFloat()
+                val isMediaRow = row.any { it.isMediaRow }
+                val rowWeight = if (isMediaRow) 0.6f else 1f
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(rowWeight),
+                    horizontalArrangement = Arrangement.spacedBy(activeLayout.keyGapDp.dp)
+                ) {
+                    for (key in row) {
+                        val weight = key.widthUnits / totalUnits
+                        val isModActive = key.type == KeyType.MODIFIER && heldModifiers.contains(key.modByte)
+                        val isShiftKey = key.type == KeyType.SHIFT
+                        val isFnKey = key.type == KeyType.FN
+                        val isSpecialKey = key.type != KeyType.CHAR || key.widthUnits > 1.1f
+                        val isBackspace = key.hid == KeyboardReportSender.KEY_BACKSPACE
+                        val isSpace = key.hid == KeyboardReportSender.KEY_SPACE
+                        val hasAlt = key.altLabel.isNotEmpty()
+                        val isConsumer = key.type == KeyType.CONSUMER
+                        val isVolumeKey = isConsumer && (key.consumerCode == 0x00E9 || key.consumerCode == 0x00EA)
+                        val showFnLabel = fnHeld && key.fnLabel.isNotEmpty()
+
+                        val displayLabel = when {
+                            showFnLabel -> key.fnLabel
+                            key.type == KeyType.MODIFIER || key.type == KeyType.SHIFT || key.type == KeyType.FN -> key.label
+                            isConsumer && key.label.isEmpty() -> ""
+                            key.label.isEmpty() -> ""
+                            isShifted -> key.shiftLabel
+                            else -> key.label
+                        }
+
+                        var pressed by remember { mutableStateOf(false) }
+                        val animScale by animateFloatAsState(
+                            targetValue = if (pressed) 0.93f else 1f,
+                            animationSpec = if (pressed) tween(15) else spring(dampingRatio = 0.4f, stiffness = Spring.StiffnessMedium),
+                            label = "s"
+                        )
+
+                        val glassBg = Color.White.copy(alpha = 0.08f)
+                        val glassBgSpecial = Color.White.copy(alpha = 0.05f)
+                        val glassBorder = Color.White.copy(alpha = 0.12f)
+                        val accentBorder = accent.copy(alpha = 0.5f)
+
+                        val bg by animateColorAsState(
+                            targetValue = when {
+                                isShiftKey && shiftState == ShiftState.CAPS_LOCK -> accent.copy(alpha = 0.35f)
+                                isShiftKey && shiftState == ShiftState.SHIFTED -> accent.copy(alpha = 0.2f)
+                                isModActive -> accent.copy(alpha = 0.25f)
+                                isFnKey && fnHeld -> accent.copy(alpha = 0.25f)
+                                isSpecialKey || isFnKey || isMediaRow || isConsumer -> glassBgSpecial
+                                else -> glassBg
+                            },
+                            animationSpec = tween(100), label = "bg"
+                        )
+                        val borderColor = when {
+                            isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accentBorder
+                            else -> glassBorder
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(weight)
+                                .fillMaxHeight()
+                                .scale(animScale)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(bg)
+                                .border(0.5.dp, borderColor, RoundedCornerShape(5.dp))
+                                .pointerInput(key.label + key.hid + key.modByte + fnHeld) {
+                                    awaitEachGesture {
+                                        awaitFirstDown(requireUnconsumed = false).also { it.consume() }
+                                        pressed = true
+                                        doHaptic()
+                                        doSound()
+
+                                        val pressTime = SystemClock.uptimeMillis()
+                                        var repeatRunnable: Runnable? = null
+                                        var altFired = false
+
+                                        // Long-press popup timer for keys with alt characters
+                                        var altPopupRunnable: Runnable? = null
+                                        if (hasAlt && key.type == KeyType.CHAR) {
+                                            altPopupRunnable = Runnable {
+                                                popupKey = key
+                                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            }
+                                            handler.postDelayed(altPopupRunnable, 300)
+                                        }
+
+                                        when {
+                                            key.type == KeyType.SHIFT -> {
+                                                shiftState = when (shiftState) {
+                                                    ShiftState.OFF -> ShiftState.SHIFTED
+                                                    ShiftState.SHIFTED -> ShiftState.CAPS_LOCK
+                                                    ShiftState.CAPS_LOCK -> ShiftState.OFF
+                                                }
+                                                if (shiftState != ShiftState.OFF) keyboardEngine.pressModifier(KeyboardReportSender.MOD_LSHIFT)
+                                                else keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
+                                            }
+                                            key.type == KeyType.MODIFIER -> {
+                                                if (heldModifiers.contains(key.modByte)) {
+                                                    heldModifiers.remove(key.modByte)
+                                                    keyboardEngine.releaseModifier(key.modByte)
+                                                } else {
+                                                    heldModifiers.add(key.modByte)
+                                                    keyboardEngine.pressModifier(key.modByte)
+                                                }
+                                            }
+                                            key.type == KeyType.FN -> fnHeld = !fnHeld
+                                            isConsumer && !fnHeld -> {
+                                                onConsumerPress(key.consumerCode)
+                                                if (isVolumeKey) {
+                                                    val volRunnable = object : Runnable {
+                                                        override fun run() {
+                                                            onConsumerRelease()
+                                                            onConsumerPress(key.consumerCode)
+                                                            handler.postDelayed(this, 100)
+                                                        }
+                                                    }
+                                                    repeatRunnable = volRunnable
+                                                    handler.postDelayed(volRunnable, 400)
+                                                }
+                                            }
+                                            isConsumer && fnHeld && key.fnHid != 0.toByte() -> {
+                                                keyboardEngine.pressKey(key.fnHid)
+                                            }
+                                            isBackspace -> {
+                                                keyboardEngine.pressKey(key.hid)
+                                                val bsRunnable = object : Runnable {
+                                                    var count = 0
+                                                    override fun run() {
+                                                        keyboardEngine.releaseKey(key.hid)
+                                                        keyboardEngine.pressKey(key.hid)
+                                                        count++
+                                                        val interval = (250L / (count + 1)).coerceIn(33L, 250L)
+                                                        handler.postDelayed(this, interval)
+                                                    }
+                                                }
+                                                repeatRunnable = bsRunnable
+                                                handler.postDelayed(bsRunnable, 500)
+                                            }
+                                            isSpace -> {
+                                                val now = SystemClock.uptimeMillis()
+                                                if (doubleSpaceForPeriod && (now - lastSpaceTime) < 400) {
+                                                    keyboardEngine.pressKey(KeyboardReportSender.KEY_BACKSPACE)
+                                                    keyboardEngine.releaseKey(KeyboardReportSender.KEY_BACKSPACE)
+                                                    keyboardEngine.pressKey(KeyboardReportSender.KEY_PERIOD)
+                                                    keyboardEngine.releaseKey(KeyboardReportSender.KEY_PERIOD)
+                                                    keyboardEngine.pressKey(KeyboardReportSender.KEY_SPACE)
+                                                    lastSpaceTime = 0L
+                                                } else {
+                                                    keyboardEngine.pressKey(key.hid)
+                                                    lastSpaceTime = now
+                                                }
+                                            }
+                                            key.autoShift -> {
+                                                keyboardEngine.pressModifier(KeyboardReportSender.MOD_LSHIFT)
+                                                keyboardEngine.pressKey(key.hid)
+                                            }
+                                            hasAlt -> {
+                                                // Don't press yet — wait for long-press decision
+                                            }
+                                            else -> keyboardEngine.pressKey(key.hid)
+                                        }
+
+                                        // Wait for finger lift
+                                        do {
+                                            val ev = awaitPointerEvent()
+                                            ev.changes.forEach { it.consume() }
+                                        } while (ev.changes.any { it.pressed })
+                                        pressed = false
+                                        popupKey = null
+
+                                        // Cancel timers
+                                        repeatRunnable?.let { handler.removeCallbacks(it) }
+                                        altPopupRunnable?.let { handler.removeCallbacks(it) }
+
+                                        val holdTime = SystemClock.uptimeMillis() - pressTime
+
+                                        // Release logic
+                                        when {
+                                            key.type == KeyType.SHIFT || key.type == KeyType.MODIFIER || key.type == KeyType.FN -> {}
+                                            isConsumer && !fnHeld -> {
+                                                onConsumerRelease()
+                                            }
+                                            isConsumer && fnHeld && key.fnHid != 0.toByte() -> {
+                                                keyboardEngine.releaseKey(key.fnHid)
+                                            }
+                                            key.autoShift -> {
+                                                keyboardEngine.releaseKey(key.hid)
+                                                keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
+                                                if (shiftState == ShiftState.SHIFTED) {
+                                                    shiftState = ShiftState.OFF
+                                                }
+                                                heldModifiers.forEach { keyboardEngine.releaseModifier(it) }
+                                                heldModifiers.clear()
+                                            }
+                                            hasAlt && holdTime >= 300 -> {
+                                                // Long-press: type the alt character
+                                                keyboardEngine.pressKey(key.altHid)
+                                                keyboardEngine.releaseKey(key.altHid)
+                                                if (shiftState == ShiftState.SHIFTED) {
+                                                    shiftState = ShiftState.OFF
+                                                    keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
+                                                }
+                                                heldModifiers.forEach { keyboardEngine.releaseModifier(it) }
+                                                heldModifiers.clear()
+                                            }
+                                            hasAlt -> {
+                                                // Short tap: type the letter
+                                                keyboardEngine.pressKey(key.hid)
+                                                keyboardEngine.releaseKey(key.hid)
+                                                if (shiftState == ShiftState.SHIFTED) {
+                                                    shiftState = ShiftState.OFF
+                                                    keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
+                                                }
+                                                heldModifiers.forEach { keyboardEngine.releaseModifier(it) }
+                                                heldModifiers.clear()
+                                            }
+                                            else -> {
+                                                keyboardEngine.releaseKey(key.hid)
+                                                if (shiftState == ShiftState.SHIFTED) {
+                                                    shiftState = ShiftState.OFF
+                                                    keyboardEngine.releaseModifier(KeyboardReportSender.MOD_LSHIFT)
+                                                }
+                                                heldModifiers.forEach { keyboardEngine.releaseModifier(it) }
+                                                heldModifiers.clear()
+                                            }
+                                        }
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Key label — icon for media keys, text otherwise
+                            if (key.icon.isNotEmpty() && !showFnLabel) {
+                                MediaKeyIcon(
+                                    icon = key.icon,
+                                    tint = if (isMediaRow) Color(0xFF8888A0) else Color(0xFFE0E0E0),
+                                    size = 14f
+                                )
+                            } else {
+                                Text(
+                                    text = displayLabel,
+                                    color = when {
+                                        isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> Color(0xFFB8A9FB)
+                                        isMediaRow || isConsumer -> Color(0xFF8888A0)
+                                        isSpecialKey || isFnKey -> Color(0xFF8888A0)
+                                        else -> Color(0xFFE0E0E0)
+                                    },
+                                    fontSize = when {
+                                        key.label.length > 3 -> 8.sp
+                                        key.label.length > 1 -> 9.sp
+                                        else -> 11.sp
+                                    },
+                                    fontWeight = FontWeight.Medium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                            // Alt character hint (top-right corner)
+                            if (hasAlt && !fnHeld) {
+                                Text(
+                                    text = key.altLabel,
+                                    color = Color(0xFF666680),
+                                    fontSize = 7.sp,
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)
+                                )
+                            }
+                            // Caps Lock dot
+                            if (key.label == "Caps" && shiftState == ShiftState.CAPS_LOCK) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(3.dp)
+                                        .size(3.dp)
+                                        .clip(CircleShape)
+                                        .background(accent)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Long-press popup overlay
+        popupKey?.let { pk ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .wrapContentSize(Alignment.TopCenter)
+                    .padding(top = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(accent.copy(alpha = 0.9f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = pk.altLabel,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Split Screen Container (Milestone 3.0)
+// ──────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun SplitScreen(
+    trackpadContent: @Composable (Modifier) -> Unit,
+    keyboardContent: @Composable (Modifier) -> Unit
+) {
+    val surfaceBg = Color(0xFF08080D)
+    val glassBorder = Color.White.copy(alpha = 0.12f)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(surfaceBg)
+            .windowInsetsPadding(WindowInsets.systemBars)
+    ) {
+        // Top: Trackpad (65%)
+        trackpadContent(
+            Modifier
+                .weight(0.65f)
+                .fillMaxWidth()
+        )
+
+        // Horizontal divider
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .background(glassBorder)
+        )
+
+        // Bottom: Compact Keyboard (35%)
+        keyboardContent(
+            Modifier
+                .weight(0.35f)
+                .fillMaxWidth()
+        )
     }
 }
