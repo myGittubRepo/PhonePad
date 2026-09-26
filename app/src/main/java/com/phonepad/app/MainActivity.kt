@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothHidDevice
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.content.res.Configuration
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -76,6 +77,7 @@ import android.provider.Settings as AndroidSettings
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowInsetsController
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -95,6 +97,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -156,6 +159,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.draw.alpha
@@ -167,6 +171,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.StrokeCap
@@ -177,6 +182,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.animation.core.EaseInOutCubic
@@ -346,6 +353,7 @@ class MainActivity : ComponentActivity() {
     private var activeMode by mutableStateOf("trackpad") // trackpad, keyboard, split
     private var doubleSpaceForPeriod by mutableStateOf(true)
     private var keySoundEnabled by mutableStateOf(false)
+    private var showModePopup by mutableStateOf(false)
 
     // Phase 2 trackpad surface state
     private var showGestureGuide by mutableStateOf(false)
@@ -845,194 +853,214 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToTrackpad = { currentScreen = AppScreen.TRACKPAD },
                                 modifier = Modifier.padding(innerPadding)
                             )
-                            AppScreen.TRACKPAD -> Box {
-                                TrackpadScreen(
-                                    connectionStatus = connectionStatus,
-                                    bondedDevices = bondedDevices,
-                                    isConnected = connectedDevice != null,
-                                    connectedHostName = connectedDevice?.let { getDeviceDisplayName(it) },
-                                    onDeviceSelected = { device -> connectToDevice(device) },
-                                    onTouchEvent = { event -> handleTrackpadTouch(event) },
-                                    showSettings = showSettings,
-                                    onToggleSettings = { showSettings = !showSettings },
-                                    sensitivity = sensitivityMultiplier,
-                                    onSensitivityChange = { sensitivityMultiplier = it; saveHostSettings() },
-                                    tapToClick = tapToClickEnabled,
-                                    onTapToClickChange = { tapToClickEnabled = it; saveHostSettings() },
-                                    naturalScroll = naturalScrollEnabled,
-                                    onNaturalScrollChange = { naturalScrollEnabled = it; saveHostSettings() },
-                                    rippleEnabled = rippleEnabled,
-                                    onRippleChange = { rippleEnabled = it; saveHostSettings() },
-                                    hapticsEnabled = hapticsEnabled,
-                                    onHapticsChange = { hapticsEnabled = it; saveHostSettings() },
-                                    statusBarAutoHide = statusBarAutoHide,
-                                    onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
-                                    trackpadTheme = trackpadTheme,
-                                    onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
-                                    uiTheme = uiTheme,
-                                    onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
-                                    batteryPercent = getBatteryPercent(),
-                                    onToggleGestureGuide = { settingsInitialTab = 1; showSettings = true },
-                                    settingsInitialTab = settingsInitialTab,
-                                    showDeviceManager = showDeviceManager,
-                                    onToggleDeviceManager = { showDeviceManager = !showDeviceManager },
-                                    onDismissDeviceManager = { showDeviceManager = false },
-                                    deviceNicknames = deviceNicknames,
-                                    onRenameDevice = { addr, name -> saveDeviceNickname(addr, name) },
-                                    onForgetDevice = { device -> forgetDevice(device) },
-                                    onNavigateToPairingGuide = {
-                                        showDeviceManager = false
-                                        showSettings = false
-                                        currentScreen = AppScreen.PAIRING_GUIDE
-                                    },
-                                    isBluetoothOff = isBluetoothOff,
-                                    onTurnOnBluetooth = {
-                                        try {
-                                            startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
-                                        } catch (_: Exception) {}
-                                    },
-                                    showDisconnectSheet = showDisconnectSheet,
-                                    disconnectAutoReconnectFailed = disconnectAutoReconnectFailed,
-                                    onDismissDisconnectSheet = { showDisconnectSheet = false },
-                                    onRetryConnect = {
-                                        showDisconnectSheet = false
-                                        disconnectAutoReconnectFailed = false
-                                        autoReconnectAttempted = false
-                                        ensureHidSession()
-                                    },
-                                    appVersion = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" },
-                                    hasBluetoothPermissions = hasBluetoothPermissions(),
-                                    onRequestPermissions = { requestBluetoothPermissions() },
-                                    onOpenAppSettings = { openAppSettings() },
-                                    modifier = Modifier
-                                )
-                                // ── Milestone 1.0 test buttons + keyboard switch ──
-                                if (!showSettings) {
-                                    Column(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(top = 40.dp, end = 12.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        // Test: type 'a' via keyboard report
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF7C6AF6))
-                                                .clickable {
-                                                    sendKeyboardReport(0x00, KEY_A)
-                                                    sendKeyboardReport(0x00)
+                            AppScreen.TRACKPAD, AppScreen.KEYBOARD, AppScreen.SPLIT -> {
+                                // Enforce orientation lock on every recomposition
+                                SideEffect {
+                                    when (currentScreen) {
+                                        AppScreen.SPLIT -> requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                        AppScreen.KEYBOARD -> requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                        else -> requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                    }
+                                }
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    // Cross-fade between modes
+                                    Crossfade(
+                                        targetState = currentScreen,
+                                        animationSpec = tween(200),
+                                        label = "mode-crossfade"
+                                    ) { screen ->
+                                        when (screen) {
+                                            AppScreen.TRACKPAD -> TrackpadScreen(
+                                                connectionStatus = connectionStatus,
+                                                bondedDevices = bondedDevices,
+                                                isConnected = connectedDevice != null,
+                                                connectedHostName = connectedDevice?.let { getDeviceDisplayName(it) },
+                                                onDeviceSelected = { device -> connectToDevice(device) },
+                                                onTouchEvent = { event -> handleTrackpadTouch(event) },
+                                                showSettings = showSettings,
+                                                onToggleSettings = { showSettings = !showSettings },
+                                                sensitivity = sensitivityMultiplier,
+                                                onSensitivityChange = { sensitivityMultiplier = it; saveHostSettings() },
+                                                tapToClick = tapToClickEnabled,
+                                                onTapToClickChange = { tapToClickEnabled = it; saveHostSettings() },
+                                                naturalScroll = naturalScrollEnabled,
+                                                onNaturalScrollChange = { naturalScrollEnabled = it; saveHostSettings() },
+                                                rippleEnabled = rippleEnabled,
+                                                onRippleChange = { rippleEnabled = it; saveHostSettings() },
+                                                hapticsEnabled = hapticsEnabled,
+                                                onHapticsChange = { hapticsEnabled = it; saveHostSettings() },
+                                                statusBarAutoHide = statusBarAutoHide,
+                                                onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
+                                                trackpadTheme = trackpadTheme,
+                                                onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
+                                                uiTheme = uiTheme,
+                                                onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
+                                                batteryPercent = getBatteryPercent(),
+                                                onToggleGestureGuide = { settingsInitialTab = 1; showSettings = true },
+                                                settingsInitialTab = settingsInitialTab,
+                                                showDeviceManager = showDeviceManager,
+                                                onToggleDeviceManager = { showDeviceManager = !showDeviceManager },
+                                                onDismissDeviceManager = { showDeviceManager = false },
+                                                deviceNicknames = deviceNicknames,
+                                                onRenameDevice = { addr, name -> saveDeviceNickname(addr, name) },
+                                                onForgetDevice = { device -> forgetDevice(device) },
+                                                onNavigateToPairingGuide = {
+                                                    showDeviceManager = false
+                                                    showSettings = false
+                                                    currentScreen = AppScreen.PAIRING_GUIDE
                                                 },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("A", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                                isBluetoothOff = isBluetoothOff,
+                                                onTurnOnBluetooth = {
+                                                    try {
+                                                        startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
+                                                    } catch (_: Exception) {}
+                                                },
+                                                showDisconnectSheet = showDisconnectSheet,
+                                                disconnectAutoReconnectFailed = disconnectAutoReconnectFailed,
+                                                onDismissDisconnectSheet = { showDisconnectSheet = false },
+                                                onRetryConnect = {
+                                                    showDisconnectSheet = false
+                                                    disconnectAutoReconnectFailed = false
+                                                    autoReconnectAttempted = false
+                                                    ensureHidSession()
+                                                },
+                                                appVersion = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" },
+                                                hasBluetoothPermissions = hasBluetoothPermissions(),
+                                                onRequestPermissions = { requestBluetoothPermissions() },
+                                                onOpenAppSettings = { openAppSettings() },
+                                                modifier = Modifier
+                                            )
+                                            AppScreen.KEYBOARD -> KeyboardScreen(
+                                                keyboardEngine = keyboardEngine,
+                                                onSwitchToTrackpad = {
+                                                    showModePopup = !showModePopup
+                                                },
+                                                onConsumerKey = { code -> sendConsumerKeyPress(code) },
+                                                onConsumerPress = { code -> sendConsumerReport(code) },
+                                                onConsumerRelease = { sendConsumerReport(0) },
+                                                doubleSpaceForPeriod = doubleSpaceForPeriod,
+                                                keySoundEnabled = keySoundEnabled
+                                            )
+                                            AppScreen.SPLIT -> SplitScreen(
+                                                trackpadContent = { mod ->
+                                                    Box(modifier = mod) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxSize()
+                                                                .background(
+                                                                    when (trackpadTheme) {
+                                                                        "darker" -> Color(0xFF050508)
+                                                                        "amoled" -> Color.Black
+                                                                        else -> Color(0xFF111118)
+                                                                    }
+                                                                )
+                                                                .then(
+                                                                    if (connectedDevice != null) {
+                                                                        Modifier.pointerInteropFilter { event ->
+                                                                            handleTrackpadTouch(event)
+                                                                        }
+                                                                    } else Modifier
+                                                                )
+                                                        ) {
+                                                            if (connectedDevice == null) {
+                                                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                                    Text("Not connected", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp)
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                keyboardContent = { mod ->
+                                                    CompactKeyboardScreen(
+                                                        keyboardEngine = keyboardEngine,
+                                                        onConsumerPress = { code -> sendConsumerReport(code) },
+                                                        onConsumerRelease = { sendConsumerReport(0) },
+                                                        doubleSpaceForPeriod = doubleSpaceForPeriod,
+                                                        keySoundEnabled = keySoundEnabled,
+                                                        modifier = mod
+                                                    )
+                                                }
+                                            )
+                                            else -> {}
                                         }
-                                        // Test: volume down via consumer report
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF3DDC84))
-                                                .clickable { sendConsumerKeyPress(CONSUMER_VOLUME_DOWN) },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("V-", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    // Mode switcher popup
+                                    if (!showSettings) {
+                                        if (showModePopup) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clickable(
+                                                        interactionSource = remember { MutableInteractionSource() },
+                                                        indication = null
+                                                    ) { showModePopup = false }
+                                            )
                                         }
-                                        // Switch to keyboard
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFFF6B6B))
-                                                .clickable { currentScreen = AppScreen.KEYBOARD },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("⌨", fontSize = 20.sp)
-                                        }
-                                        // Switch to split mode
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF4B9EE8))
-                                                .clickable { currentScreen = AppScreen.SPLIT },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("⊞", fontSize = 20.sp, color = Color.White)
+                                        when (currentScreen) {
+                                            AppScreen.KEYBOARD -> {
+                                                // Keyboard: no trigger button (🖱 key is the trigger), popup at bottom-right
+                                                ModePopup(
+                                                    currentMode = currentScreen,
+                                                    isVisible = showModePopup,
+                                                    onModeSelected = { mode ->
+                                                        showModePopup = false
+                                                        if (mode != currentScreen) {
+                                                            keyboardEngine.releaseAll()
+                                                            currentScreen = mode
+                                                        }
+                                                    },
+                                                    onToggle = { showModePopup = !showModePopup },
+                                                    showTrigger = false,
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomEnd)
+                                                        .windowInsetsPadding(WindowInsets.navigationBars)
+                                                        .padding(end = 12.dp, bottom = 12.dp)
+                                                )
+                                            }
+                                            AppScreen.SPLIT -> {
+                                                // Split: trigger at top-center, popup drops down
+                                                ModePopup(
+                                                    currentMode = currentScreen,
+                                                    isVisible = showModePopup,
+                                                    onModeSelected = { mode ->
+                                                        showModePopup = false
+                                                        if (mode != currentScreen) {
+                                                            keyboardEngine.releaseAll()
+                                                            currentScreen = mode
+                                                        }
+                                                    },
+                                                    onToggle = { showModePopup = !showModePopup },
+                                                    dropDown = true,
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopCenter)
+                                                        .windowInsetsPadding(WindowInsets.statusBars)
+                                                        .padding(top = 8.dp)
+                                                )
+                                            }
+                                            else -> {
+                                                // Trackpad: mouse icon trigger at bottom-right, popup above
+                                                ModePopup(
+                                                    currentMode = currentScreen,
+                                                    isVisible = showModePopup,
+                                                    onModeSelected = { mode ->
+                                                        showModePopup = false
+                                                        if (mode != currentScreen) {
+                                                            keyboardEngine.releaseAll()
+                                                            currentScreen = mode
+                                                        }
+                                                    },
+                                                    onToggle = { showModePopup = !showModePopup },
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomEnd)
+                                                        .windowInsetsPadding(WindowInsets.navigationBars)
+                                                        .padding(end = 12.dp, bottom = 12.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
-                            AppScreen.KEYBOARD -> KeyboardScreen(
-                                keyboardEngine = keyboardEngine,
-                                onSwitchToTrackpad = {
-                                    keyboardEngine.releaseAll()
-                                    currentScreen = AppScreen.TRACKPAD
-                                },
-                                onConsumerKey = { code -> sendConsumerKeyPress(code) },
-                                onConsumerPress = { code -> sendConsumerReport(code) },
-                                onConsumerRelease = { sendConsumerReport(0) },
-                                doubleSpaceForPeriod = doubleSpaceForPeriod,
-                                keySoundEnabled = keySoundEnabled
-                            )
-                            AppScreen.SPLIT -> SplitScreen(
-                                trackpadContent = { mod ->
-                                    Box(modifier = mod) {
-                                        // Touch surface layer (behind everything)
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(
-                                                    when (trackpadTheme) {
-                                                        "darker" -> Color(0xFF050508)
-                                                        "amoled" -> Color.Black
-                                                        else -> Color(0xFF111118)
-                                                    }
-                                                )
-                                                .then(
-                                                    if (connectedDevice != null) {
-                                                        Modifier.pointerInteropFilter { event ->
-                                                            handleTrackpadTouch(event)
-                                                        }
-                                                    } else Modifier
-                                                )
-                                        ) {
-                                            if (connectedDevice == null) {
-                                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                                    Text("Not connected", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp)
-                                                }
-                                            }
-                                        }
-                                        // Back button (on top, intercepts before trackpad)
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopStart)
-                                                .padding(8.dp)
-                                                .size(32.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.White.copy(alpha = 0.08f))
-                                                .clickable {
-                                                    keyboardEngine.releaseAll()
-                                                    currentScreen = AppScreen.TRACKPAD
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("◀", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-                                        }
-                                    }
-                                },
-                                keyboardContent = { mod ->
-                                    CompactKeyboardScreen(
-                                        keyboardEngine = keyboardEngine,
-                                        onConsumerPress = { code -> sendConsumerReport(code) },
-                                        onConsumerRelease = { sendConsumerReport(0) },
-                                        doubleSpaceForPeriod = doubleSpaceForPeriod,
-                                        keySoundEnabled = keySoundEnabled,
-                                        modifier = mod
-                                    )
-                                }
-                            )
                         }
                     }
                 }
@@ -1059,6 +1087,15 @@ class MainActivity : ComponentActivity() {
         }
         if (bluetoothAdapter != null && hasBluetoothPermissions()) {
             ensureHidSession()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        when (currentScreen) {
+            AppScreen.SPLIT -> requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            AppScreen.KEYBOARD -> requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            else -> {}
         }
     }
 
@@ -3882,50 +3919,6 @@ fun TrackpadScreen(
             )
         }
 
-        // Gesture guide swipe-up affordance (bottom center)
-        if (!showSettings) {
-            val affordanceAlpha by infiniteTransition.animateFloat(
-                initialValue = 0.15f, targetValue = 0.35f,
-                animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
-                label = "affordance"
-            )
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 10.dp)
-                    .alpha(affordanceAlpha)
-                    .clickable { onToggleGestureGuide() },
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.KeyboardArrowUp,
-                    contentDescription = "Gesture Guide",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-                Text(
-                    text = "Gestures",
-                    color = Color.White,
-                    fontSize = 9.sp,
-                    letterSpacing = 1.sp
-                )
-            }
-        }
-
-        // Edge zone detector: swipe up from bottom 20dp opens gesture guide
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(20.dp)
-                .align(Alignment.BottomCenter)
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures { _, dragAmount ->
-                        if (dragAmount < -10f && !showSettings) {
-                            onToggleGestureGuide()
-                        }
-                    }
-                }
-        )
 
         // Settings overlay (full-screen)
         AnimatedVisibility(
@@ -7017,4 +7010,134 @@ fun SplitScreen(
                 .fillMaxWidth()
         )
     }
+}
+
+@Composable
+fun ModePopup(
+    currentMode: AppScreen,
+    isVisible: Boolean,
+    onModeSelected: (AppScreen) -> Unit,
+    onToggle: () -> Unit,
+    showTrigger: Boolean = true,
+    dropDown: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val accent = Color(0xFF7C6AF6)
+    val modes = listOf(
+        Triple(AppScreen.TRACKPAD, "Trackpad", "trackpad"),
+        Triple(AppScreen.KEYBOARD, "Keyboard", "keyboard"),
+        Triple(AppScreen.SPLIT, "Split", "split")
+    )
+
+    @Composable
+    fun PopupOptions() {
+        AnimatedVisibility(
+            visible = isVisible,
+            enter = fadeIn(tween(150)) + slideInVertically(tween(200)) { if (dropDown) -it / 2 else it / 2 },
+            exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { if (dropDown) -it / 2 else it / 2 }
+        ) {
+            Column(
+                modifier = Modifier
+                    .then(if (dropDown) Modifier.padding(top = 8.dp) else Modifier.padding(bottom = 8.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF1A1A24))
+                    .border(0.5.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                    .padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                modes.forEach { (mode, label, _) ->
+                    val isActive = mode == currentMode
+                    val bg by animateColorAsState(
+                        if (isActive) accent else Color.Transparent,
+                        animationSpec = tween(200), label = "mode-bg"
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(bg)
+                            .clickable { onModeSelected(mode) }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Canvas(modifier = Modifier.size(18.dp)) {
+                            val w = size.width; val h = size.height
+                            val iconColor = if (isActive) Color.White else Color.White.copy(alpha = 0.5f)
+                            val stroke = if (isActive) 2f else 1.5f
+                            when (mode) {
+                                AppScreen.TRACKPAD -> {
+                                    drawRoundRect(iconColor, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.84f), CornerRadius(w * 0.12f), style = Stroke(stroke))
+                                    if (isActive) drawCircle(Color.White, w * 0.06f, Offset(w * 0.55f, h * 0.45f))
+                                }
+                                AppScreen.KEYBOARD -> {
+                                    for (r in 0..2) for (c in 0..2) drawRoundRect(iconColor, Offset(w * (0.12f + c * 0.3f), h * (0.12f + r * 0.3f)), Size(w * 0.18f, h * 0.14f), CornerRadius(w * 0.03f), style = if (isActive) Fill else Stroke(stroke))
+                                }
+                                AppScreen.SPLIT -> {
+                                    drawRoundRect(iconColor, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.84f), CornerRadius(w * 0.1f), style = Stroke(stroke))
+                                    drawLine(iconColor, Offset(w * 0.18f, h * 0.5f), Offset(w * 0.82f, h * 0.5f), strokeWidth = stroke)
+                                }
+                                else -> {}
+                            }
+                        }
+                        Text(
+                            text = label,
+                            color = if (isActive) Color.White else Color.White.copy(alpha = 0.6f),
+                            fontSize = 13.sp,
+                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun TriggerButton() {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    if (isVisible) accent.copy(alpha = 0.2f)
+                    else Color.White.copy(alpha = 0.06f)
+                )
+                .border(
+                    0.5.dp,
+                    if (isVisible) accent.copy(alpha = 0.5f)
+                    else Color.White.copy(alpha = 0.08f),
+                    RoundedCornerShape(12.dp)
+                )
+                .clickable { onToggle() },
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.size(22.dp)) {
+                val w = size.width; val h = size.height
+                val c = if (isVisible) Color.White else Color.White.copy(alpha = 0.45f)
+                // Mouse icon: body + scroll wheel + buttons divider
+                val bodyTop = h * 0.08f; val bodyBot = h * 0.92f
+                val bodyLeft = w * 0.2f; val bodyRight = w * 0.8f
+                val bodyW = bodyRight - bodyLeft; val bodyH = bodyBot - bodyTop
+                drawRoundRect(c, Offset(bodyLeft, bodyTop), Size(bodyW, bodyH), CornerRadius(bodyW * 0.45f), style = Stroke(1.6f))
+                // Center divider line (top half only)
+                drawLine(c, Offset(w * 0.5f, bodyTop + bodyH * 0.05f), Offset(w * 0.5f, bodyTop + bodyH * 0.35f), strokeWidth = 1.2f)
+                // Scroll wheel
+                drawRoundRect(c, Offset(w * 0.44f, bodyTop + bodyH * 0.12f), Size(w * 0.12f, bodyH * 0.16f), CornerRadius(w * 0.03f), style = Stroke(1.2f))
+            }
+        }
+    }
+
+    Box(modifier = modifier) {
+        if (dropDown) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (showTrigger) TriggerButton()
+                PopupOptions()
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.End) {
+                PopupOptions()
+                if (showTrigger) TriggerButton()
+            }
+        }
+    }
+
 }
