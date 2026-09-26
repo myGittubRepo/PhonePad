@@ -204,6 +204,98 @@ enum class AppScreen {
     SPLASH, COMPAT_FAIL, ONBOARDING, PERMISSION, PERMISSION_DENIED, PAIRING_GUIDE, TRACKPAD, KEYBOARD, SPLIT
 }
 
+data class AppThemeColors(
+    val surface: Color,
+    val keySurface: Color,
+    val keySpecialSurface: Color,
+    val keyBorder: Color,
+    val accent: Color,
+    val accentGlow: Color,
+    val accentBorder: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val edgeGlow: Color,
+    val divider: Color
+)
+
+object AppThemes {
+    val Midnight = AppThemeColors(
+        surface = Color(0xFF08080D),
+        keySurface = Color(0x14FFFFFF),
+        keySpecialSurface = Color(0x0DFFFFFF),
+        keyBorder = Color(0x1FFFFFFF),
+        accent = Color(0xFF7C6AF6),
+        accentGlow = Color(0xFF4B4FCF),
+        accentBorder = Color(0x807C6AF6),
+        textPrimary = Color(0xFFE0E0E0),
+        textSecondary = Color(0xFF8888A0),
+        edgeGlow = Color(0x1F2B2D6E),
+        divider = Color(0x1FFFFFFF)
+    )
+    val Graphite = AppThemeColors(
+        surface = Color(0xFF0C0C0F),
+        keySurface = Color(0x12FFFFFF),
+        keySpecialSurface = Color(0x0AFFFFFF),
+        keyBorder = Color(0x1AFFFFFF),
+        accent = Color(0xFF8E8EA0),
+        accentGlow = Color(0xFF5A5A70),
+        accentBorder = Color(0x808E8EA0),
+        textPrimary = Color(0xFFD0D0D6),
+        textSecondary = Color(0xFF707080),
+        edgeGlow = Color(0x14505060),
+        divider = Color(0x1AFFFFFF)
+    )
+    val Ember = AppThemeColors(
+        surface = Color(0xFF0D0908),
+        keySurface = Color(0x14FFFFFF),
+        keySpecialSurface = Color(0x0DFFFFFF),
+        keyBorder = Color(0x1EFFC4A0),
+        accent = Color(0xFFE8864A),
+        accentGlow = Color(0xFFB85C2A),
+        accentBorder = Color(0x80E8864A),
+        textPrimary = Color(0xFFE8DCD0),
+        textSecondary = Color(0xFF9A8878),
+        edgeGlow = Color(0x1A6E3B2B),
+        divider = Color(0x1EFFC4A0)
+    )
+    val Aurora = AppThemeColors(
+        surface = Color(0xFF080D0C),
+        keySurface = Color(0x14FFFFFF),
+        keySpecialSurface = Color(0x0DFFFFFF),
+        keyBorder = Color(0x1EA0FFE0),
+        accent = Color(0xFF4AE8C4),
+        accentGlow = Color(0xFF2AB89A),
+        accentBorder = Color(0x804AE8C4),
+        textPrimary = Color(0xFFD0E8E0),
+        textSecondary = Color(0xFF78A098),
+        edgeGlow = Color(0x1A2B6E5B),
+        divider = Color(0x1EA0FFE0)
+    )
+    val Porcelain = AppThemeColors(
+        surface = Color(0xFF141218),
+        keySurface = Color(0x18FFFFFF),
+        keySpecialSurface = Color(0x10FFFFFF),
+        keyBorder = Color(0x22FFFFFF),
+        accent = Color(0xFFC48ABA),
+        accentGlow = Color(0xFF9A6890),
+        accentBorder = Color(0x80C48ABA),
+        textPrimary = Color(0xFFE0D8DE),
+        textSecondary = Color(0xFF8A8090),
+        edgeGlow = Color(0x1A6E4B60),
+        divider = Color(0x22FFFFFF)
+    )
+
+    fun fromName(name: String): AppThemeColors = when (name) {
+        "graphite" -> Graphite
+        "ember" -> Ember
+        "aurora" -> Aurora
+        "porcelain" -> Porcelain
+        "darker" -> Graphite
+        "amoled" -> Midnight
+        else -> Midnight
+    }
+}
+
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -340,7 +432,7 @@ class MainActivity : ComponentActivity() {
     private var rippleEnabled by mutableStateOf(false)
     private var hapticsEnabled by mutableStateOf(true)
     private var statusBarAutoHide by mutableStateOf(true)
-    private var trackpadTheme by mutableStateOf("dark") // dark, darker, amoled
+    private var trackpadTheme by mutableStateOf("midnight")
     private var uiTheme by mutableStateOf("dark") // dark, light
 
     // Phase 1 UI navigation
@@ -760,7 +852,7 @@ class MainActivity : ComponentActivity() {
         palmGraceMovementThresholdPx = PALM_GRACE_MOVEMENT_DP * resources.displayMetrics.density
         loadDeviceNicknames()
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
-        trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "dark") ?: "dark"
+        trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "midnight") ?: "midnight"
         uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
@@ -939,48 +1031,48 @@ class MainActivity : ComponentActivity() {
                                                 onConsumerPress = { code -> sendConsumerReport(code) },
                                                 onConsumerRelease = { sendConsumerReport(0) },
                                                 doubleSpaceForPeriod = doubleSpaceForPeriod,
-                                                keySoundEnabled = keySoundEnabled
+                                                keySoundEnabled = keySoundEnabled,
+                                                theme = AppThemes.fromName(trackpadTheme)
                                             )
-                                            AppScreen.SPLIT -> SplitScreen(
-                                                trackpadContent = { mod ->
-                                                    Box(modifier = mod) {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .fillMaxSize()
-                                                                .background(
-                                                                    when (trackpadTheme) {
-                                                                        "darker" -> Color(0xFF050508)
-                                                                        "amoled" -> Color.Black
-                                                                        else -> Color(0xFF111118)
+                                            AppScreen.SPLIT -> {
+                                                val splitTheme = AppThemes.fromName(trackpadTheme)
+                                                SplitScreen(
+                                                    trackpadContent = { mod ->
+                                                        Box(modifier = mod) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .fillMaxSize()
+                                                                    .background(splitTheme.surface)
+                                                                    .then(
+                                                                        if (connectedDevice != null) {
+                                                                            Modifier.pointerInteropFilter { event ->
+                                                                                handleTrackpadTouch(event)
+                                                                            }
+                                                                        } else Modifier
+                                                                    )
+                                                            ) {
+                                                                if (connectedDevice == null) {
+                                                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                                        Text("Not connected", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp)
                                                                     }
-                                                                )
-                                                                .then(
-                                                                    if (connectedDevice != null) {
-                                                                        Modifier.pointerInteropFilter { event ->
-                                                                            handleTrackpadTouch(event)
-                                                                        }
-                                                                    } else Modifier
-                                                                )
-                                                        ) {
-                                                            if (connectedDevice == null) {
-                                                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                                                    Text("Not connected", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp)
                                                                 }
                                                             }
                                                         }
-                                                    }
-                                                },
-                                                keyboardContent = { mod ->
-                                                    CompactKeyboardScreen(
-                                                        keyboardEngine = keyboardEngine,
-                                                        onConsumerPress = { code -> sendConsumerReport(code) },
-                                                        onConsumerRelease = { sendConsumerReport(0) },
-                                                        doubleSpaceForPeriod = doubleSpaceForPeriod,
-                                                        keySoundEnabled = keySoundEnabled,
-                                                        modifier = mod
-                                                    )
-                                                }
-                                            )
+                                                    },
+                                                    keyboardContent = { mod ->
+                                                        CompactKeyboardScreen(
+                                                            keyboardEngine = keyboardEngine,
+                                                            onConsumerPress = { code -> sendConsumerReport(code) },
+                                                            onConsumerRelease = { sendConsumerReport(0) },
+                                                            doubleSpaceForPeriod = doubleSpaceForPeriod,
+                                                            keySoundEnabled = keySoundEnabled,
+                                                            theme = splitTheme,
+                                                            modifier = mod
+                                                        )
+                                                    },
+                                                    theme = splitTheme
+                                                )
+                                            }
                                             else -> {}
                                         }
                                     }
@@ -1331,7 +1423,7 @@ class MainActivity : ComponentActivity() {
         rippleEnabled = prefs.getBoolean(address + PREF_RIPPLE_ENABLED, false)
         hapticsEnabled = prefs.getBoolean(address + PREF_HAPTICS_ENABLED, true)
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
-        trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "dark") ?: "dark"
+        trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "midnight") ?: "midnight"
         uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
         loadDeviceNicknames()
         Log.d(TAG, "Loaded settings for $address: sensitivity=$sensitivityMultiplier, tapToClick=$tapToClickEnabled, naturalScroll=$naturalScrollEnabled, ripple=$rippleEnabled, haptics=$hapticsEnabled")
@@ -3639,21 +3731,10 @@ fun TrackpadScreen(
     onOpenAppSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val darkSurface = when (trackpadTheme) {
-        "darker" -> Color(0xFF050508)
-        "amoled" -> Color.Black
-        else -> Color(0xFF111118)
-    }
-    val accentGlow = when (trackpadTheme) {
-        "darker" -> Color(0xFF3B3F9E)
-        "amoled" -> Color.Transparent
-        else -> Color(0xFF4B4FCF)
-    }
-    val edgeGlow = when (trackpadTheme) {
-        "darker" -> Color(0xFF2B2D6E).copy(alpha = 0.06f)
-        "amoled" -> Color.Transparent
-        else -> Color(0xFF2B2D6E).copy(alpha = 0.12f)
-    }
+    val themeColors = AppThemes.fromName(trackpadTheme)
+    val darkSurface = themeColors.surface
+    val accentGlow = themeColors.accentGlow
+    val edgeGlow = themeColors.edgeGlow
 
     // Status bar fade: visible initially, fades after 3s of no interaction
     var statusBarVisible by remember { mutableStateOf(true) }
@@ -3725,7 +3806,7 @@ fun TrackpadScreen(
             .background(darkSurface)
     ) {
         // Very subtle ambient gradient — theme-aware
-        if (trackpadTheme != "amoled") {
+        if (accentGlow != Color.Transparent) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cx = size.width / 2f
                 val cy = size.height * 0.35f
@@ -3942,6 +4023,8 @@ fun TrackpadScreen(
                 onStatusBarAutoHideChange = onStatusBarAutoHideChange,
                 uiTheme = uiTheme,
                 onUiThemeChange = onUiThemeChange,
+                trackpadTheme = trackpadTheme,
+                onTrackpadThemeChange = onTrackpadThemeChange,
                 settingsInitialTab = settingsInitialTab,
                 connectedHostName = connectedHostName,
                 bondedDevices = bondedDevices,
@@ -4108,6 +4191,8 @@ private fun SettingsOverlay(
     onStatusBarAutoHideChange: (Boolean) -> Unit,
     uiTheme: String,
     onUiThemeChange: (String) -> Unit,
+    trackpadTheme: String,
+    onTrackpadThemeChange: (String) -> Unit,
     settingsInitialTab: Int,
     connectedHostName: String?,
     bondedDevices: List<BluetoothDevice>,
@@ -4527,6 +4612,8 @@ private fun SettingsOverlay(
                         onRippleChange = onRippleChange,
                         statusBarAutoHide = statusBarAutoHide,
                         onStatusBarAutoHideChange = onStatusBarAutoHideChange,
+                        trackpadTheme = trackpadTheme,
+                        onTrackpadThemeChange = onTrackpadThemeChange,
                         isDark = isDark,
                         surface1 = surface1,
                         accent = accent,
@@ -4599,6 +4686,8 @@ private fun SettingsControlsTab(
     onRippleChange: (Boolean) -> Unit,
     statusBarAutoHide: Boolean,
     onStatusBarAutoHideChange: (Boolean) -> Unit,
+    trackpadTheme: String,
+    onTrackpadThemeChange: (String) -> Unit,
     isDark: Boolean,
     surface1: Color,
     accent: Color,
@@ -4916,6 +5005,78 @@ private fun SettingsControlsTab(
             toggleOff = toggleOff,
             border = border
         )
+    }
+
+    Spacer(modifier = Modifier.height(20.dp))
+
+    // ── Theme Selector ──
+    Text(
+        "THEME",
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = text3,
+        letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+    )
+
+    val themes = listOf(
+        Triple("midnight", "Midnight", AppThemes.Midnight),
+        Triple("graphite", "Graphite", AppThemes.Graphite),
+        Triple("ember", "Ember", AppThemes.Ember),
+        Triple("aurora", "Aurora", AppThemes.Aurora),
+        Triple("porcelain", "Porcelain", AppThemes.Porcelain)
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        themes.forEach { (id, label, colors) ->
+            val isSelected = trackpadTheme == id
+            val selBorder by animateColorAsState(
+                if (isSelected) colors.accent else border,
+                animationSpec = tween(200), label = "tb-$id"
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(
+                        width = if (isSelected) 1.5.dp else 0.5.dp,
+                        color = selBorder,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .background(surface1)
+                    .clickable { onTrackpadThemeChange(id) }
+                    .padding(vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Color swatch
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(colors.surface)
+                        .border(1.dp, colors.keyBorder, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(colors.accent)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    label,
+                    fontSize = 10.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isSelected) colors.accent else text3,
+                    maxLines = 1
+                )
+            }
+        }
     }
 }
 
@@ -6336,7 +6497,8 @@ fun KeyboardScreen(
     onConsumerRelease: () -> Unit = {},
     doubleSpaceForPeriod: Boolean = true,
     keySoundEnabled: Boolean = false,
-    layout: KeyboardLayout = KeyboardLayouts.FULL_QWERTY
+    layout: KeyboardLayout = KeyboardLayouts.FULL_QWERTY,
+    theme: AppThemeColors = AppThemes.Midnight
 ) {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
@@ -6356,10 +6518,10 @@ fun KeyboardScreen(
     var fnHeld by remember { mutableStateOf(false) }
     var lastSpaceTime by remember { mutableStateOf(0L) }
 
-    val surfaceBg = Color(0xFF08080D)
+    val surfaceBg = theme.surface
     val keyGap = layout.keyGapDp.dp
     val rowGap = layout.rowGapDp.dp
-    val accent = Color(0xFF7C6AF6)
+    val accent = theme.accent
 
     fun doHaptic() {
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -6424,10 +6586,10 @@ fun KeyboardScreen(
                             animationSpec = tween(if (pressed) 15 else 150), label = "a"
                         )
 
-                        val glassBg = Color.White.copy(alpha = 0.08f)
-                        val glassBgSpecial = Color.White.copy(alpha = 0.05f)
-                        val glassBorder = Color.White.copy(alpha = 0.12f)
-                        val accentBorder = accent.copy(alpha = 0.5f)
+                        val glassBg = theme.keySurface
+                        val glassBgSpecial = theme.keySpecialSurface
+                        val glassBorder = theme.keyBorder
+                        val accentBorder = theme.accentBorder
 
                         val bg by animateColorAsState(
                             targetValue = when {
@@ -6435,15 +6597,20 @@ fun KeyboardScreen(
                                 isShiftKey && shiftState == ShiftState.SHIFTED -> accent.copy(alpha = 0.2f)
                                 isModActive -> accent.copy(alpha = 0.25f)
                                 isFnKey && fnHeld -> accent.copy(alpha = 0.25f)
+                                pressed -> glassBg.copy(alpha = glassBg.alpha * 1.8f)
                                 isSpecialKey || isMediaRow || isConsumer || isFnKey -> glassBgSpecial
                                 else -> glassBg
                             },
                             animationSpec = tween(100), label = "bg"
                         )
-                        val borderColor = when {
-                            isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accentBorder
-                            else -> glassBorder
-                        }
+                        val borderColor by animateColorAsState(
+                            targetValue = when {
+                                isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accentBorder
+                                pressed -> glassBorder.copy(alpha = glassBorder.alpha * 1.5f)
+                                else -> glassBorder
+                            },
+                            animationSpec = tween(80), label = "brd"
+                        )
 
                         Box(
                             modifier = Modifier
@@ -6581,16 +6748,16 @@ fun KeyboardScreen(
                             if (key.icon.isNotEmpty() && !showFnLabel) {
                                 MediaKeyIcon(
                                     icon = key.icon,
-                                    tint = Color(0xFF8888A0),
+                                    tint = theme.textSecondary,
                                     size = if (isMediaRow) 14f else 12f
                                 )
                             } else {
                                 Text(
                                     text = displayLabel,
                                     color = when {
-                                        isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> Color(0xFFB8A9FB)
-                                        isSpecialKey || isMediaRow || isConsumer || isFnKey -> Color(0xFF8888A0)
-                                        else -> Color(0xFFE0E0E0)
+                                        isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accent.copy(alpha = 0.85f)
+                                        isSpecialKey || isMediaRow || isConsumer || isFnKey -> theme.textSecondary
+                                        else -> theme.textPrimary
                                     },
                                     fontSize = when {
                                         isMediaRow || showFnLabel -> 10.sp
@@ -6601,6 +6768,17 @@ fun KeyboardScreen(
                                     fontWeight = FontWeight.Medium,
                                     textAlign = TextAlign.Center
                                 )
+                            }
+                            // Active modifier bottom-edge glow
+                            if (isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld)) {
+                                Canvas(modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.BottomCenter)) {
+                                    drawRoundRect(
+                                        brush = Brush.horizontalGradient(
+                                            listOf(Color.Transparent, accent.copy(alpha = 0.6f), Color.Transparent)
+                                        ),
+                                        cornerRadius = CornerRadius(2f)
+                                    )
+                                }
                             }
                             if (isCapsLocked) {
                                 Box(
@@ -6631,6 +6809,7 @@ fun CompactKeyboardScreen(
     onConsumerRelease: () -> Unit = {},
     doubleSpaceForPeriod: Boolean = true,
     keySoundEnabled: Boolean = false,
+    theme: AppThemeColors = AppThemes.Midnight,
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
@@ -6645,8 +6824,8 @@ fun CompactKeyboardScreen(
     var popupOffset by remember { mutableStateOf(Offset.Zero) }
 
     val activeLayout = if (fnHeld) KeyboardLayouts.COMPACT_SYMBOLS else KeyboardLayouts.COMPACT_QWERTY
-    val accent = Color(0xFF7C6AF6)
-    val surfaceBg = Color(0xFF08080D)
+    val accent = theme.accent
+    val surfaceBg = theme.surface
 
     fun doHaptic() {
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -6698,10 +6877,10 @@ fun CompactKeyboardScreen(
                             label = "s"
                         )
 
-                        val glassBg = Color.White.copy(alpha = 0.08f)
-                        val glassBgSpecial = Color.White.copy(alpha = 0.05f)
-                        val glassBorder = Color.White.copy(alpha = 0.12f)
-                        val accentBorder = accent.copy(alpha = 0.5f)
+                        val glassBg = theme.keySurface
+                        val glassBgSpecial = theme.keySpecialSurface
+                        val glassBorder = theme.keyBorder
+                        val accentBorder = theme.accentBorder
 
                         val bg by animateColorAsState(
                             targetValue = when {
@@ -6709,15 +6888,20 @@ fun CompactKeyboardScreen(
                                 isShiftKey && shiftState == ShiftState.SHIFTED -> accent.copy(alpha = 0.2f)
                                 isModActive -> accent.copy(alpha = 0.25f)
                                 isFnKey && fnHeld -> accent.copy(alpha = 0.25f)
+                                pressed -> glassBg.copy(alpha = glassBg.alpha * 1.8f)
                                 isSpecialKey || isFnKey || isMediaRow || isConsumer -> glassBgSpecial
                                 else -> glassBg
                             },
                             animationSpec = tween(100), label = "bg"
                         )
-                        val borderColor = when {
-                            isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accentBorder
-                            else -> glassBorder
-                        }
+                        val borderColor by animateColorAsState(
+                            targetValue = when {
+                                isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accentBorder
+                                pressed -> glassBorder.copy(alpha = glassBorder.alpha * 1.5f)
+                                else -> glassBorder
+                            },
+                            animationSpec = tween(80), label = "brd"
+                        )
 
                         Box(
                             modifier = Modifier
@@ -6896,17 +7080,17 @@ fun CompactKeyboardScreen(
                             if (key.icon.isNotEmpty() && !showFnLabel) {
                                 MediaKeyIcon(
                                     icon = key.icon,
-                                    tint = if (isMediaRow) Color(0xFF8888A0) else Color(0xFFE0E0E0),
+                                    tint = theme.textSecondary,
                                     size = 14f
                                 )
                             } else {
                                 Text(
                                     text = displayLabel,
                                     color = when {
-                                        isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> Color(0xFFB8A9FB)
-                                        isMediaRow || isConsumer -> Color(0xFF8888A0)
-                                        isSpecialKey || isFnKey -> Color(0xFF8888A0)
-                                        else -> Color(0xFFE0E0E0)
+                                        isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accent.copy(alpha = 0.85f)
+                                        isMediaRow || isConsumer -> theme.textSecondary
+                                        isSpecialKey || isFnKey -> theme.textSecondary
+                                        else -> theme.textPrimary
                                     },
                                     fontSize = when {
                                         key.label.length > 3 -> 8.sp
@@ -6977,15 +7161,13 @@ fun CompactKeyboardScreen(
 @Composable
 fun SplitScreen(
     trackpadContent: @Composable (Modifier) -> Unit,
-    keyboardContent: @Composable (Modifier) -> Unit
+    keyboardContent: @Composable (Modifier) -> Unit,
+    theme: AppThemeColors = AppThemes.Midnight
 ) {
-    val surfaceBg = Color(0xFF08080D)
-    val glassBorder = Color.White.copy(alpha = 0.12f)
-
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(surfaceBg)
+            .background(theme.surface)
             .windowInsetsPadding(WindowInsets.systemBars)
     ) {
         // Top: Trackpad (65%)
@@ -6995,13 +7177,39 @@ fun SplitScreen(
                 .fillMaxWidth()
         )
 
-        // Horizontal divider
+        // Divider with drag handle
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(2.dp)
-                .background(glassBorder)
-        )
+                .height(12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Divider line
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(theme.divider)
+            )
+            // Drag handle (3 short horizontal lines)
+            Column(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(theme.surface)
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                repeat(3) {
+                    Box(
+                        modifier = Modifier
+                            .width(16.dp)
+                            .height(1.dp)
+                            .background(theme.divider)
+                    )
+                }
+            }
+        }
 
         // Bottom: Compact Keyboard (35%)
         keyboardContent(
