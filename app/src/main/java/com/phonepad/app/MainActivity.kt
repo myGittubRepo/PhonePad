@@ -61,6 +61,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.runtime.derivedStateOf
+import kotlin.math.roundToInt
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -91,6 +95,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -286,9 +294,11 @@ object AppThemes {
     )
 
     fun fromName(name: String): AppThemeColors = when (name) {
-        "graphite" -> Graphite
+        "graphite" -> Midnight
+        "indigo" -> Midnight
         "ember" -> Ember
         "aurora" -> Aurora
+        "rose" -> Porcelain
         "porcelain" -> Porcelain
         "darker" -> Graphite
         "amoled" -> Midnight
@@ -317,6 +327,7 @@ class MainActivity : ComponentActivity() {
         private const val PREF_SPLIT_RATIO = "_split_ratio"
         private const val PREF_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
         private const val PREF_GESTURE_GUIDE_SECTIONS = "gesture_guide_sections"
+        private const val PREF_KEYBOARD_LAYOUT = "keyboard_layout"
 
         private const val EDGE_ZONE_DP = 20f
         private const val AUTO_RECONNECT_TIMEOUT_MS = 10_000L
@@ -434,6 +445,7 @@ class MainActivity : ComponentActivity() {
     private var statusBarAutoHide by mutableStateOf(true)
     private var trackpadTheme by mutableStateOf("midnight")
     private var uiTheme by mutableStateOf("dark") // dark, light
+    private var keyboardLayoutName by mutableStateOf("qwerty")
 
     // Phase 1 UI navigation
     private var currentScreen by mutableStateOf(AppScreen.SPLASH)
@@ -854,6 +866,7 @@ class MainActivity : ComponentActivity() {
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
         trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "midnight") ?: "midnight"
         uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
+        keyboardLayoutName = prefs.getString(PREF_KEYBOARD_LAYOUT, "qwerty") ?: "qwerty"
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -985,6 +998,8 @@ class MainActivity : ComponentActivity() {
                                                 onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
                                                 trackpadTheme = trackpadTheme,
                                                 onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
+                                                keyboardLayout = keyboardLayoutName,
+                                                onKeyboardLayoutChange = { keyboardLayoutName = it; saveGlobalSettings() },
                                                 uiTheme = uiTheme,
                                                 onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
                                                 batteryPercent = getBatteryPercent(),
@@ -1032,6 +1047,7 @@ class MainActivity : ComponentActivity() {
                                                 onConsumerRelease = { sendConsumerReport(0) },
                                                 doubleSpaceForPeriod = doubleSpaceForPeriod,
                                                 keySoundEnabled = keySoundEnabled,
+                                                layout = KeyboardLayouts.fullLayoutFromName(keyboardLayoutName),
                                                 theme = AppThemes.fromName(trackpadTheme)
                                             )
                                             AppScreen.SPLIT -> {
@@ -1079,10 +1095,20 @@ class MainActivity : ComponentActivity() {
 
                                     // Mode switcher popup
                                     if (!showSettings) {
-                                        if (showModePopup) {
+                                        // Scrim / dismiss overlay (dark backdrop in keyboard mode)
+                                        AnimatedVisibility(
+                                            visible = showModePopup,
+                                            enter = fadeIn(tween(200)),
+                                            exit = fadeOut(tween(200))
+                                        ) {
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxSize()
+                                                    .background(
+                                                        if (currentScreen == AppScreen.KEYBOARD)
+                                                            Color.Black.copy(alpha = 0.55f)
+                                                        else Color.Transparent
+                                                    )
                                                     .clickable(
                                                         interactionSource = remember { MutableInteractionSource() },
                                                         indication = null
@@ -1425,6 +1451,7 @@ class MainActivity : ComponentActivity() {
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
         trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "midnight") ?: "midnight"
         uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
+        keyboardLayoutName = prefs.getString(PREF_KEYBOARD_LAYOUT, "qwerty") ?: "qwerty"
         loadDeviceNicknames()
         Log.d(TAG, "Loaded settings for $address: sensitivity=$sensitivityMultiplier, tapToClick=$tapToClickEnabled, naturalScroll=$naturalScrollEnabled, ripple=$rippleEnabled, haptics=$hapticsEnabled")
     }
@@ -1446,6 +1473,7 @@ class MainActivity : ComponentActivity() {
             .putBoolean(PREF_STATUS_BAR_AUTO_HIDE, statusBarAutoHide)
             .putString(PREF_TRACKPAD_THEME, trackpadTheme)
             .putString(PREF_UI_THEME, uiTheme)
+            .putString(PREF_KEYBOARD_LAYOUT, keyboardLayoutName)
             .apply()
     }
 
@@ -3707,6 +3735,8 @@ fun TrackpadScreen(
     onStatusBarAutoHideChange: (Boolean) -> Unit,
     trackpadTheme: String,
     onTrackpadThemeChange: (String) -> Unit,
+    keyboardLayout: String,
+    onKeyboardLayoutChange: (String) -> Unit,
     uiTheme: String,
     onUiThemeChange: (String) -> Unit,
     batteryPercent: Int,
@@ -4025,6 +4055,8 @@ fun TrackpadScreen(
                 onUiThemeChange = onUiThemeChange,
                 trackpadTheme = trackpadTheme,
                 onTrackpadThemeChange = onTrackpadThemeChange,
+                keyboardLayout = keyboardLayout,
+                onKeyboardLayoutChange = onKeyboardLayoutChange,
                 settingsInitialTab = settingsInitialTab,
                 connectedHostName = connectedHostName,
                 bondedDevices = bondedDevices,
@@ -4170,7 +4202,7 @@ private fun ConnectionStatusPill(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Phase 4 — Settings Bottom Sheet (3 tabs: Controls, Gestures, More)
+// Phase 4 — Settings Panel
 // ──────────────────────────────────────────────────────────────────────────────
 
 @SuppressLint("MissingPermission")
@@ -4193,6 +4225,8 @@ private fun SettingsOverlay(
     onUiThemeChange: (String) -> Unit,
     trackpadTheme: String,
     onTrackpadThemeChange: (String) -> Unit,
+    keyboardLayout: String,
+    onKeyboardLayoutChange: (String) -> Unit,
     settingsInitialTab: Int,
     connectedHostName: String?,
     bondedDevices: List<BluetoothDevice>,
@@ -4206,875 +4240,437 @@ private fun SettingsOverlay(
     val context = LocalContext.current
     val isDark = uiTheme == "dark"
 
-    // Theme colors
-    val bg = if (isDark) Color(0xFF08080D) else Color(0xFFF2F2F7)
-    val surface0 = if (isDark) Color(0xFF0F0F16) else Color(0xFFE8E8EE)
-    val surface1 = if (isDark) Color(0xFF14141E) else Color.White
-    val surface2 = if (isDark) Color(0xFF1B1B28) else Color(0xFFF5F5FA)
-    val accent = Color(0xFF7C6AF6)
-    val accentLight = Color(0xFF9D8DF7)
-    val accentSoft = if (isDark) Color(0xFF7C6AF6).copy(alpha = 0.08f) else Color(0xFF7C6AF6).copy(alpha = 0.06f)
-    val green = Color(0xFF3DDC84)
-    val pink = Color(0xFFF472B6)
-    val blue = Color(0xFF60A5FA)
-    val text1 = if (isDark) Color(0xFFEEEEF2) else Color(0xFF1A1A2E)
-    val text2 = if (isDark) Color(0xFF9494AC) else Color(0xFF6B6B88)
-    val text3 = if (isDark) Color(0xFF5C5C74) else Color(0xFF9898AE)
-    val border = if (isDark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.06f)
-    val toggleOff = if (isDark) Color(0xFF2A2A3A) else Color(0xFFCDCDD8)
-    val success = Color(0xFF3DDC84)
-    val successSoft = Color(0xFF3DDC84).copy(alpha = 0.10f)
-    val trackBg = if (isDark) Color(0xFF2A2A3A) else Color(0xFFD8D8E4)
-    val thumbSh = if (isDark) Color(0x80000000) else Color(0x1F000000)
-    val accentGlow = accent.copy(alpha = if (isDark) 0.25f else 0.12f)
-    val devBg = if (isDark) Color(0xFF1B1B28) else Color(0xFFF0F0F6)
-    val devConn = Color(0xFF3DDC84).copy(alpha = 0.08f)
-    val tabBg = if (isDark) Color(0xFF1B1B28) else Color.White
-    val dashedColor = accent.copy(alpha = if (isDark) 0.25f else 0.35f)
+    val bg = if (isDark) Color(0xFF0C0C0E) else Color(0xFFF8F7F4)
+    val ink = if (isDark) Color(0xFFF2F2F4) else Color(0xFF16161A)
+    val mute = if (isDark) Color(0xFF85858F) else Color(0xFF74747C)
+    val line = if (isDark) Color.White.copy(alpha = 0.09f) else Color.Black.copy(alpha = 0.10f)
+    val ok = if (isDark) Color(0xFF3DDC97) else Color(0xFF1FA971)
+    val sliderTrack = if (isDark) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.16f)
+    val thumbCol = if (isDark) Color(0xFF0C0C0E) else Color.White
 
-    val cardShape = RoundedCornerShape(16.dp)
-    val sheetShape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+    val accentOptions = listOf(
+        Triple("graphite", "Graphite", ink),
+        Triple("indigo", "Indigo", Color(0xFF7A83FF)),
+        Triple("ember", "Ember", Color(0xFFF27A3A)),
+        Triple("aurora", "Aurora", Color(0xFF1FBF9A)),
+        Triple("rose", "Rose", Color(0xFFE56FA5))
+    )
+    val acc = accentOptions.firstOrNull { it.first == trackpadTheme }?.third ?: ink
+    val accentName = accentOptions.firstOrNull { it.first == trackpadTheme }?.second ?: "Graphite"
 
-    var selectedTab by remember { mutableStateOf(settingsInitialTab.coerceIn(0, 2)) }
-
-    // Slide-up animation
     val slideAnim = remember { Animatable(1f) }
-    val scrimAlpha = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        launch { scrimAlpha.animateTo(1f, tween(300)) }
-        launch { slideAnim.animateTo(0f, tween(400, easing = EaseOutCubic)) }
+        slideAnim.animateTo(0f, tween(550, easing = EaseOutCubic))
     }
+
+    val scrollState = rememberScrollState()
+    val headerHasBorder by remember { derivedStateOf { scrollState.value > 6 } }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.5f * scrimAlpha.value))
-            .clickable { onDismiss() },
-        contentAlignment = Alignment.BottomCenter
+            .offset(y = (slideAnim.value * 1200).dp)
+            .background(bg)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.82f)
-                .offset(y = (slideAnim.value * 600).dp)
-                .background(bg, sheetShape)
-                .border(0.5.dp, border, sheetShape)
-                .clickable(enabled = false) {}
-        ) {
-            // ── Gradient Header (logo + device banner) ──
-            val glassWhite = Color.White.copy(alpha = 0.16f)
-            val glassBorder = Color.White.copy(alpha = 0.28f)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .shadow(
-                        elevation = 10.dp,
-                        shape = RoundedCornerShape(22.dp),
-                        ambientColor = Color(0x503730A3),
-                        spotColor = Color(0x604F46E5)
-                    )
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF3730A3), // Deep Royal Indigo
-                                Color(0xFF4F46E5), // Electric Indigo
-                                Color(0xFF7C3AED), // Vivid Purple
-                                Color(0xFF8B5CF6)  // Luminous Violet
-                            ),
-                            start = Offset(0f, 0f),
-                            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-                        )
-                    )
-                    .border(
-                        1.dp,
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.35f),
-                                Color.White.copy(alpha = 0.12f)
-                            )
-                        ),
-                        RoundedCornerShape(22.dp)
-                    )
-            ) {
-                // Celestial sonar radar axis with glowing epicenter & orbital rings
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    val cx = size.width * 0.52f
-                    val cy = size.height * 0.50f
-
-                    // Soft ambient radial glow behind the epicenter
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color.White.copy(alpha = 0.12f), Color.Transparent),
-                            center = Offset(cx, cy),
-                            radius = 120.dp.toPx()
-                        ),
-                        radius = 120.dp.toPx(),
-                        center = Offset(cx, cy)
-                    )
-
-                    // Concentric sonar rings
-                    val ringColor = Color.White.copy(alpha = 0.08f)
-                    for (r in listOf(115.dp.toPx(), 75.dp.toPx(), 45.dp.toPx())) {
-                        drawCircle(
-                            color = ringColor,
-                            radius = r,
-                            center = Offset(cx, cy),
-                            style = Stroke(1.2.dp.toPx())
-                        )
-                    }
-
-                    // Horizontal radar underline axis between the 2 rows across the card
-                    drawLine(
-                        color = Color.White.copy(alpha = 0.24f),
-                        start = Offset(0f, cy),
-                        end = Offset(size.width, cy),
-                        strokeWidth = 1.dp.toPx()
-                    )
-
-                    // Glowing center dot (outer pulse halo + core)
-                    drawCircle(
-                        color = Color.White.copy(alpha = 0.35f),
-                        radius = 6.dp.toPx(),
-                        center = Offset(cx, cy)
-                    )
-                    drawCircle(
-                        color = Color.White,
-                        radius = 3.5.dp.toPx(),
-                        center = Offset(cx, cy)
-                    )
-
-                    // Micro-constellation accent dots
-                    drawCircle(
-                        color = Color.White.copy(alpha = 0.35f),
-                        radius = 1.5.dp.toPx(),
-                        center = Offset(size.width * 0.15f, cy)
-                    )
-                    drawCircle(
-                        color = Color.White.copy(alpha = 0.28f),
-                        radius = 1.8.dp.toPx(),
-                        center = Offset(size.width * 0.42f, cy - 35.dp.toPx())
-                    )
-                    drawCircle(
-                        color = Color.White.copy(alpha = 0.22f),
-                        radius = 1.5.dp.toPx(),
-                        center = Offset(size.width * 0.88f, cy)
-                    )
-                }
-
-                Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 18.dp)) {
-                    // Top row: app icon + name, theme + close
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // App icon — solid crisp white squircle tile with drop shadow
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .shadow(4.dp, RoundedCornerShape(13.dp), spotColor = Color(0x40000000))
-                                    .clip(RoundedCornerShape(13.dp))
-                                    .background(Color.White),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.PhoneAndroid,
-                                    contentDescription = null,
-                                    tint = Color(0xFF4338CA),
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                "PhonePad",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                letterSpacing = (-0.3).sp
-                            )
-                        }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Theme toggle — frosted glass circle
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(glassWhite)
-                                    .border(1.dp, glassBorder, CircleShape)
-                                    .clickable { onUiThemeChange(if (isDark) "light" else "dark") },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
-                                    contentDescription = "Toggle theme",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            // Close — frosted glass circle
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(glassWhite)
-                                    .border(1.dp, glassBorder, CircleShape)
-                                    .clickable { onDismiss() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(26.dp))
-
-                    // Device banner row inside gradient
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Device icon — frosted rounded square
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(13.dp))
-                                .background(Color.White.copy(alpha = 0.16f))
-                                .border(1.dp, glassBorder, RoundedCornerShape(13.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Computer,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = connectedHostName ?: "No device",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White,
-                                lineHeight = 19.sp,
-                                maxLines = 1
-                            )
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .background(
-                                        if (isConnected) Color.Black.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.15f),
-                                        RoundedCornerShape(50)
-                                    )
-                                    .border(
-                                        1.dp,
-                                        if (isConnected) Color(0xFF22C55E).copy(alpha = 0.50f) else Color.White.copy(alpha = 0.15f),
-                                        RoundedCornerShape(50)
-                                    )
-                                    .padding(horizontal = 9.dp, vertical = 2.5.dp)
-                            ) {
-                                if (isConnected) {
-                                    val pulseTransition = rememberInfiniteTransition(label = "pulse")
-                                    val pulseAlpha by pulseTransition.animateFloat(
-                                        initialValue = 1f,
-                                        targetValue = 0.35f,
-                                        animationSpec = infiniteRepeatable(
-                                            animation = tween(1000, easing = LinearEasing),
-                                            repeatMode = RepeatMode.Reverse
-                                        ),
-                                        label = "pulseAlpha"
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .alpha(pulseAlpha)
-                                            .background(Color(0xFF22C55E))
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                }
-                                Text(
-                                    text = if (isConnected) "Connected" else "Disconnected",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.White,
-                                    lineHeight = 14.sp
-                                )
-                            }
-                        }
-                        // Device switcher buttons — glass style, perfectly aligned below top row buttons
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(glassWhite)
-                                    .border(1.dp, glassBorder, RoundedCornerShape(12.dp))
-                                    .clickable { onOpenDeviceManager() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Filled.Computer, contentDescription = "Device manager", tint = Color.White, modifier = Modifier.size(18.dp))
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(glassWhite)
-                                    .border(1.dp, glassBorder, RoundedCornerShape(12.dp))
-                                    .clickable { onNavigateToPairingGuide() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Outlined.Add, contentDescription = "Add device", tint = Color.White, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // ── Tab Bar ──
+        Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(surface0)
-                    .border(0.5.dp, border, RoundedCornerShape(16.dp))
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                val tabLabels = listOf("Controls", "Gestures", "More")
-                tabLabels.forEachIndexed { index, label ->
-                    val isSelected = selectedTab == index
-                    val tabTextColor by animateColorAsState(
-                        targetValue = if (isSelected) text1 else text3,
-                        animationSpec = tween(250),
-                        label = "tabText$index"
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .then(
-                                if (isSelected) Modifier
-                                    .shadow(3.dp, RoundedCornerShape(13.dp))
-                                    .clip(RoundedCornerShape(13.dp))
-                                    .background(surface1)
-                                    .border(0.5.dp, border, RoundedCornerShape(13.dp))
-                                else Modifier
-                                    .clip(RoundedCornerShape(13.dp))
-                                    .background(Color.Transparent)
-                            )
-                            .clickable { selectedTab = index }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 13.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            color = tabTextColor
-                        )
+                    .height(60.dp)
+                    .drawBehind {
+                        if (headerHasBorder) drawLine(line, Offset(0f, size.height), Offset(size.width, size.height), 1f)
                     }
-                }
+                    .padding(start = 24.dp, end = 24.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Settings", fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = ink, letterSpacing = (-0.3).sp)
+                Text(
+                    "Done",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = ink,
+                    modifier = Modifier.clickable { onDismiss() }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp)
+                )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // ── Tab Content ──
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 40.dp)
             ) {
-                when (selectedTab) {
-                    0 -> SettingsControlsTab(
-                        sensitivity = sensitivity,
-                        onSensitivityChange = onSensitivityChange,
-                        tapToClick = tapToClick,
-                        onTapToClickChange = onTapToClickChange,
-                        naturalScroll = naturalScroll,
-                        onNaturalScrollChange = onNaturalScrollChange,
-                        hapticsEnabled = hapticsEnabled,
-                        onHapticsChange = onHapticsChange,
-                        rippleEnabled = rippleEnabled,
-                        onRippleChange = onRippleChange,
-                        statusBarAutoHide = statusBarAutoHide,
-                        onStatusBarAutoHideChange = onStatusBarAutoHideChange,
-                        trackpadTheme = trackpadTheme,
-                        onTrackpadThemeChange = onTrackpadThemeChange,
-                        isDark = isDark,
-                        surface1 = surface1,
-                        accent = accent,
-                        accentLight = accentLight,
-                        green = green,
-                        pink = pink,
-                        blue = blue,
-                        text1 = text1,
-                        text2 = text2,
-                        text3 = text3,
-                        border = border,
-                        toggleOff = toggleOff,
-                        trackBg = trackBg,
-                        thumbSh = thumbSh,
-                        accentGlow = accentGlow
-                    )
-                    1 -> SettingsGesturesTab(
-                        isDark = isDark,
-                        surface1 = surface1,
-                        accent = accent,
-                        accentSoft = accentSoft,
-                        text1 = text1,
-                        text2 = text2,
-                        text3 = text3,
-                        border = border
-                    )
-                    2 -> SettingsMoreTab(
-                        bondedDevices = bondedDevices,
-                        isConnected = isConnected,
-                        connectedDeviceAddress = connectedDeviceAddress,
-                        deviceNicknames = deviceNicknames,
-                        onOpenDeviceManager = onOpenDeviceManager,
-                        onNavigateToPairingGuide = onNavigateToPairingGuide,
-                        appVersion = appVersion,
-                        isDark = isDark,
-                        surface1 = surface1,
-                        accent = accent,
-                        accentLight = accentLight,
-                        green = green,
-                        text1 = text1,
-                        text2 = text2,
-                        text3 = text3,
-                        border = border,
-                        success = success,
-                        successSoft = successSoft,
-                        devBg = devBg,
-                        devConn = devConn,
-                        dashedColor = dashedColor
-                    )
-                }
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-        }
-    }
-}
-
-// ── Controls Tab ──
-
-@Composable
-private fun SettingsControlsTab(
-    sensitivity: Float,
-    onSensitivityChange: (Float) -> Unit,
-    tapToClick: Boolean,
-    onTapToClickChange: (Boolean) -> Unit,
-    naturalScroll: Boolean,
-    onNaturalScrollChange: (Boolean) -> Unit,
-    hapticsEnabled: Boolean,
-    onHapticsChange: (Boolean) -> Unit,
-    rippleEnabled: Boolean,
-    onRippleChange: (Boolean) -> Unit,
-    statusBarAutoHide: Boolean,
-    onStatusBarAutoHideChange: (Boolean) -> Unit,
-    trackpadTheme: String,
-    onTrackpadThemeChange: (String) -> Unit,
-    isDark: Boolean,
-    surface1: Color,
-    accent: Color,
-    accentLight: Color,
-    green: Color,
-    pink: Color,
-    blue: Color,
-    text1: Color,
-    text2: Color,
-    text3: Color,
-    border: Color,
-    toggleOff: Color,
-    trackBg: Color,
-    thumbSh: Color,
-    accentGlow: Color
-) {
-    val cardShape = RoundedCornerShape(16.dp)
-
-    // ── Cursor Speed ──
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .background(surface1)
-            .border(0.5.dp, border, cardShape)
-            .padding(16.dp)
-    ) {
-        // Header: "Cursor speed" + badge
-        val speedLabel = when {
-            sensitivity <= 0.7f -> "Precise"
-            sensitivity <= 1.4f -> "Balanced"
-            else -> "Fast"
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "Cursor speed",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = text1
-            )
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(accent.copy(alpha = 0.10f))
-                    .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 5.dp)
-            ) {
-                Text(
-                    speedLabel,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = accent
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Large value display
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                "${"%.1f".format(sensitivity)}",
-                fontSize = 38.sp,
-                fontWeight = FontWeight.Bold,
-                color = text1,
-                lineHeight = 38.sp
-            )
-            Text(
-                "×",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium,
-                color = text3,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Custom slider
-        var sliderFraction by remember { mutableStateOf((sensitivity - 0.3f) / 1.7f) }
-        LaunchedEffect(sensitivity) { sliderFraction = ((sensitivity - 0.3f) / 1.7f).coerceIn(0f, 1f) }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(36.dp)
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val w = size.width.toFloat()
-                        fun update(x: Float) {
-                            val f = (x / w).coerceIn(0f, 1f)
-                            sliderFraction = f
-                            onSensitivityChange(0.3f + f * 1.7f)
+                // ── Connected device ──
+                Column(
+                    modifier = Modifier.padding(top = 20.dp, bottom = 22.dp)
+                ) {
+                    Text("CONNECTED DEVICE", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Column {
+                            Text(
+                                connectedHostName ?: "No device",
+                                fontSize = 23.sp, fontWeight = FontWeight.SemiBold, color = ink,
+                                letterSpacing = (-0.5).sp, lineHeight = 26.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(if (isConnected) ok else mute))
+                                Spacer(modifier = Modifier.width(7.dp))
+                                Text(if (isConnected) "Connected" else "Not connected", fontSize = 13.5.sp, color = mute)
+                            }
                         }
-                        update(down.position.x)
-                        down.consume()
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            if (event.changes.all { !it.pressed }) break
-                            event.changes.forEach {
-                                update(it.position.x)
-                                it.consume()
+                        Text(
+                            "Change", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = ink,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier.clickable { onOpenDeviceManager() }.padding(bottom = 4.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(22.dp))
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+                }
+
+                // ── Pointer ──
+                Text("POINTER", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
+
+                val speedLabel = when {
+                    sensitivity <= 0.7f -> "Precise"
+                    sensitivity <= 1.4f -> "Balanced"
+                    else -> "Fast"
+                }
+                Column(modifier = Modifier.padding(top = 15.dp, bottom = 20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Column {
+                            Text("Cursor speed", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+                            Text(speedLabel, fontSize = 13.sp, color = mute)
+                        }
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                "${"%.1f".format(sensitivity)}", fontSize = 28.sp, fontWeight = FontWeight.Medium,
+                                color = ink, letterSpacing = (-0.5).sp
+                            )
+                            Text("×", fontSize = 15.sp, color = mute, modifier = Modifier.padding(start = 1.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    var sliderFraction by remember { mutableStateOf((sensitivity - 0.5f) / 2.5f) }
+                    LaunchedEffect(sensitivity) { sliderFraction = ((sensitivity - 0.5f) / 2.5f).coerceIn(0f, 1f) }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(30.dp)
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    val w = size.width.toFloat()
+                                    fun update(x: Float) {
+                                        val f = (x / w).coerceIn(0f, 1f)
+                                        sliderFraction = f
+                                        val raw = 0.5f + f * 2.5f
+                                        val snapped = (raw * 10).roundToInt() / 10f
+                                        onSensitivityChange(snapped.coerceIn(0.5f, 3.0f))
+                                    }
+                                    update(down.position.x); down.consume()
+                                    while (true) {
+                                        val ev = awaitPointerEvent()
+                                        if (ev.changes.all { !it.pressed }) break
+                                        ev.changes.forEach { update(it.position.x); it.consume() }
+                                    }
+                                }
+                            }
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val trackH = 2.dp.toPx()
+                            val trackY = size.height / 2 - trackH / 2
+                            val thumbR = 10.dp.toPx()
+                            val fillW = sliderFraction * size.width
+
+                            drawRoundRect(sliderTrack, Offset(0f, trackY), Size(size.width, trackH), CornerRadius(trackH / 2))
+                            if (fillW > 0f) drawRoundRect(acc, Offset(0f, trackY), Size(fillW, trackH), CornerRadius(trackH / 2))
+
+                            val thumbX = fillW.coerceIn(thumbR, size.width - thumbR)
+                            val cy = size.height / 2
+                            drawCircle(Color.Black.copy(alpha = 0.3f), thumbR, Offset(thumbX, cy + 1.dp.toPx()))
+                            drawCircle(ink, thumbR, Offset(thumbX, cy))
+                            drawCircle(bg, thumbR - 2.dp.toPx(), Offset(thumbX, cy))
+                        }
+                    }
+
+                    Canvas(modifier = Modifier.fillMaxWidth().height(12.dp).padding(horizontal = 9.dp)) {
+                        val count = 26
+                        for (i in 0 until count) {
+                            val x = if (count > 1) size.width * i / (count - 1) else 0f
+                            val h = if (i % 5 == 0) 8.dp.toPx() else 5.dp.toPx()
+                            drawRect(sliderTrack, Offset(x, 0f), Size(1.dp.toPx(), h))
+                        }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("0.5×", fontSize = 12.sp, color = mute)
+                        Text("3×", fontSize = 12.sp, color = mute)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                        listOf(0.8f to "Precise", 1.3f to "Balanced", 2.2f to "Fast").forEach { (value, label) ->
+                            val isOn = speedLabel == label
+                            Column(modifier = Modifier.clickable { onSensitivityChange(value) }) {
+                                Text(
+                                    label, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                                    color = if (isOn) ink else mute,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
+                                )
+                                Box(modifier = Modifier.width(if (label == "Balanced") 64.dp else 52.dp).height(2.dp).background(if (isOn) acc else Color.Transparent))
                             }
                         }
                     }
                 }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val trackH = 8.dp.toPx()
-                val trackY = (size.height - trackH) / 2
-                val thumbR = 12.dp.toPx()
-                val thumbX = thumbR + sliderFraction * (size.width - 2 * thumbR)
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
 
-                // Track background
-                drawRoundRect(
-                    color = trackBg,
-                    topLeft = Offset(0f, trackY),
-                    size = Size(size.width, trackH),
-                    cornerRadius = CornerRadius(trackH / 2)
-                )
+                SettingsToggleRow("Tap to click", "Tap anywhere to left-click", tapToClick, onTapToClickChange, ink, mute, line, acc, sliderTrack, thumbCol)
+                SettingsToggleRow("Natural scroll", "Content follows your finger", naturalScroll, onNaturalScrollChange, ink, mute, line, acc, sliderTrack, thumbCol)
+                SettingsToggleRow("Haptic feedback", "Vibrate on tap and gesture", hapticsEnabled, onHapticsChange, ink, mute, line, acc, sliderTrack, thumbCol)
 
-                // Fill gradient
-                if (thumbX > 0f) {
-                    drawRoundRect(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(accent, accentLight),
-                            startX = 0f,
-                            endX = thumbX
-                        ),
-                        topLeft = Offset(0f, trackY),
-                        size = Size(thumbX, trackH),
-                        cornerRadius = CornerRadius(trackH / 2)
-                    )
-                }
+                // ── Display ──
+                Text("DISPLAY", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
 
-                // Thumb glow ring
-                drawCircle(
-                    color = accentGlow,
-                    radius = thumbR + 4.dp.toPx(),
-                    center = Offset(thumbX, size.height / 2)
-                )
+                SettingsToggleRow("Touch ripple", "Show a ripple where you touch", rippleEnabled, onRippleChange, ink, mute, line, acc, sliderTrack, thumbCol)
+                SettingsToggleRow("Auto-hide status bar", "Fades after 3 seconds", statusBarAutoHide, onStatusBarAutoHideChange, ink, mute, line, acc, sliderTrack, thumbCol)
 
-                // Thumb shadow
-                drawCircle(
-                    color = thumbSh,
-                    radius = thumbR,
-                    center = Offset(thumbX, size.height / 2 + 1.5.dp.toPx())
-                )
-
-                // Thumb white fill
-                drawCircle(
-                    color = Color.White,
-                    radius = thumbR,
-                    center = Offset(thumbX, size.height / 2)
-                )
-
-                // Thumb inner accent dot
-                drawCircle(
-                    color = accent,
-                    radius = 4.dp.toPx(),
-                    center = Offset(thumbX, size.height / 2)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Tick marks
-        val tickCount = 10
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(10.dp)
-        ) {
-            val thumbR = 12.dp.toPx()
-            val usableW = size.width - 2 * thumbR
-            for (i in 0..tickCount) {
-                val x = thumbR + (usableW * i / tickCount)
-                val tickH = 5.dp.toPx()
-                val tickW = 2.dp.toPx()
-                val isFilled = (i.toFloat() / tickCount) <= sliderFraction
-                drawRoundRect(
-                    color = if (isFilled) accent else trackBg,
-                    topLeft = Offset(x - tickW / 2, 0f),
-                    size = Size(tickW, tickH),
-                    cornerRadius = CornerRadius(1.dp.toPx())
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("Precise", fontSize = 11.sp, color = text3)
-            Text("Balanced", fontSize = 11.sp, color = text3)
-            Text("Fast", fontSize = 11.sp, color = text3)
-        }
-    }
-
-    Spacer(modifier = Modifier.height(20.dp))
-
-    // ── Behavior ──
-    Text(
-        "BEHAVIOR",
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = text3,
-        letterSpacing = 0.6.sp,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-    )
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .background(surface1)
-            .border(0.5.dp, border, cardShape)
-    ) {
-        SettingsToggleRow(
-            title = "Tap to click",
-            description = "Tap anywhere to left-click",
-            icon = Icons.Outlined.TouchApp,
-            iconColor = accentLight,
-            iconBgColor = accent.copy(alpha = 0.12f),
-            checked = tapToClick,
-            onCheckedChange = onTapToClickChange,
-            text1 = text1,
-            text3 = text3,
-            accent = accent,
-            toggleOff = toggleOff,
-            border = border
-        )
-        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
-        SettingsToggleRow(
-            title = "Natural scroll",
-            description = "Content follows finger direction",
-            icon = Icons.Outlined.KeyboardArrowDown,
-            iconColor = green,
-            iconBgColor = green.copy(alpha = 0.10f),
-            checked = naturalScroll,
-            onCheckedChange = onNaturalScrollChange,
-            text1 = text1,
-            text3 = text3,
-            accent = accent,
-            toggleOff = toggleOff,
-            border = border
-        )
-        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
-        SettingsToggleRow(
-            title = "Haptic feedback",
-            description = "Vibrate on tap and gesture",
-            icon = Icons.Outlined.FlashOn,
-            iconColor = pink,
-            iconBgColor = pink.copy(alpha = 0.10f),
-            checked = hapticsEnabled,
-            onCheckedChange = onHapticsChange,
-            text1 = text1,
-            text3 = text3,
-            accent = accent,
-            toggleOff = toggleOff,
-            border = border
-        )
-    }
-
-    Spacer(modifier = Modifier.height(20.dp))
-
-    // ── Display ──
-    Text(
-        "DISPLAY",
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = text3,
-        letterSpacing = 0.6.sp,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-    )
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .background(surface1)
-            .border(0.5.dp, border, cardShape)
-    ) {
-        SettingsToggleRow(
-            title = "Touch ripple",
-            description = "Show ripple on touch",
-            icon = Icons.Outlined.Adjust,
-            iconColor = blue,
-            iconBgColor = blue.copy(alpha = 0.10f),
-            checked = rippleEnabled,
-            onCheckedChange = onRippleChange,
-            text1 = text1,
-            text3 = text3,
-            accent = accent,
-            toggleOff = toggleOff,
-            border = border
-        )
-        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
-        SettingsToggleRow(
-            title = "Auto-hide status bar",
-            description = "Fades after 3 seconds",
-            icon = Icons.Outlined.WebAsset,
-            iconColor = accentLight,
-            iconBgColor = accent.copy(alpha = 0.12f),
-            checked = statusBarAutoHide,
-            onCheckedChange = onStatusBarAutoHideChange,
-            text1 = text1,
-            text3 = text3,
-            accent = accent,
-            toggleOff = toggleOff,
-            border = border
-        )
-    }
-
-    Spacer(modifier = Modifier.height(20.dp))
-
-    // ── Theme Selector ──
-    Text(
-        "THEME",
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = text3,
-        letterSpacing = 0.6.sp,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-    )
-
-    val themes = listOf(
-        Triple("midnight", "Midnight", AppThemes.Midnight),
-        Triple("graphite", "Graphite", AppThemes.Graphite),
-        Triple("ember", "Ember", AppThemes.Ember),
-        Triple("aurora", "Aurora", AppThemes.Aurora),
-        Triple("porcelain", "Porcelain", AppThemes.Porcelain)
-    )
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        themes.forEach { (id, label, colors) ->
-            val isSelected = trackpadTheme == id
-            val selBorder by animateColorAsState(
-                if (isSelected) colors.accent else border,
-                animationSpec = tween(200), label = "tb-$id"
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(
-                        width = if (isSelected) 1.5.dp else 0.5.dp,
-                        color = selBorder,
-                        shape = RoundedCornerShape(14.dp)
-                    )
-                    .background(surface1)
-                    .clickable { onTrackpadThemeChange(id) }
-                    .padding(vertical = 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Color swatch
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(colors.surface)
-                        .border(1.dp, colors.keyBorder, CircleShape),
-                    contentAlignment = Alignment.Center
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 15.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(colors.accent)
-                    )
+                    Text("Appearance", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+                    Row(
+                        modifier = Modifier.border(1.dp, line, RoundedCornerShape(10.dp)).padding(2.dp)
+                    ) {
+                        listOf("Dark" to "dark", "Light" to "light").forEach { (label, value) ->
+                            val isSel = uiTheme == value
+                            Text(
+                                label, fontSize = 13.5.sp, fontWeight = FontWeight.Medium,
+                                color = if (isSel) bg else mute,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) ink else Color.Transparent)
+                                    .clickable { onUiThemeChange(value) }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    label,
-                    fontSize = 10.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (isSelected) colors.accent else text3,
-                    maxLines = 1
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 15.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Accent", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+                        Text(accentName, fontSize = 13.sp, color = mute, modifier = Modifier.padding(top = 1.dp))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                        accentOptions.forEach { (id, _, color) ->
+                            val isSel = trackpadTheme == id
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .then(
+                                        if (isSel) Modifier.drawBehind {
+                                            drawCircle(color, radius = size.width / 2 + 3.5.dp.toPx(), style = Stroke(2.dp.toPx()))
+                                        } else Modifier
+                                    )
+                                    .clip(CircleShape)
+                                    .background(color)
+                                    .clickable { onTrackpadThemeChange(id) }
+                            )
+                        }
+                    }
+                }
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+
+                // ── Keyboard ──
+                Text("KEYBOARD", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
+
+                val layoutMeta = mapOf(
+                    "qwerty" to Pair("English (US, UK)", listOf("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")),
+                    "azerty" to Pair("French", listOf("AZERTYUIOP", "QSDFGHJKLM", "WXCVBN")),
+                    "qwertz" to Pair("German", listOf("QWERTZUIOP", "ASDFGHJKL", "YXCVBNM")),
+                    "dvorak" to Pair("Ergonomic", listOf("',.PYFGCRL", "AOEUIDHTNS", ";QJKXBMWVZ")),
+                    "colemak" to Pair("Ergonomic", listOf("QWFPGJLUY;", "ARSTDHNEIO", "ZXCVBKM"))
                 )
+                val currentMeta = layoutMeta[keyboardLayout] ?: layoutMeta["qwerty"]!!
+
+                Column(modifier = Modifier.padding(top = 15.dp, bottom = 4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text("Layout", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+                        Text(currentMeta.first, fontSize = 13.sp, color = mute)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Pill chips — horizontally scrollable
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .horizontalScroll(rememberScrollState())
+                            .padding(bottom = 8.dp)
+                    ) {
+                        KeyboardLayouts.LAYOUT_OPTIONS.forEach { (id, label) ->
+                            val isSel = keyboardLayout == id
+                            val pillBg by animateColorAsState(if (isSel) ink else Color.Transparent, tween(220))
+                            val pillBorder by animateColorAsState(if (isSel) ink else line, tween(220))
+                            val pillText by animateColorAsState(if (isSel) bg else mute, tween(220))
+                            Text(
+                                label, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                                color = pillText,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(pillBg)
+                                    .border(1.dp, pillBorder, RoundedCornerShape(50))
+                                    .clickable { onKeyboardLayoutChange(id) }
+                                    .padding(horizontal = 18.dp, vertical = 9.dp)
+                            )
+                        }
+                    }
+
+                    // Mini keyboard preview
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 10.dp)
+                            .border(1.dp, line, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 8.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        currentMeta.second.forEach { row ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                row.forEachIndexed { idx, ch ->
+                                    if (idx > 0) Spacer(modifier = Modifier.width(4.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f, fill = false)
+                                            .size(29.dp, 30.dp)
+                                            .border(1.dp, line, RoundedCornerShape(7.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            ch.toString(), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                                            color = ink.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+
+                // ── Gestures ──
+                Text("GESTURES", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
+
+                val gestureGroups = listOf(
+                    Triple("One finger", 1, gestureData["1-finger"] ?: emptyList()),
+                    Triple("Two fingers", 2, gestureData["2-finger"] ?: emptyList()),
+                    Triple("Three fingers", 3, gestureData["3-finger"] ?: emptyList()),
+                    Triple("Four fingers", 4, gestureData["4-finger"] ?: emptyList())
+                )
+                gestureGroups.forEach { (label, fingerCount, entries) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = mute)
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            repeat(fingerCount) {
+                                Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(mute))
+                            }
+                        }
+                    }
+                    entries.forEach { entry ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(entry.gesture, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+                            Text(entry.action, fontSize = 15.sp, color = mute)
+                        }
+                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+                    }
+                }
+
+                // ── Devices ──
+                Text("DEVICES", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
+
+                if (bondedDevices.isEmpty()) {
+                    Text("No paired devices", fontSize = 14.sp, color = mute, modifier = Modifier.padding(vertical = 15.dp))
+                } else {
+                    bondedDevices.forEach { device ->
+                        val nickname = deviceNicknames[device.address]
+                        val displayName = nickname ?: device.name ?: device.address
+                        val isThisConnected = device.address == connectedDeviceAddress
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenDeviceManager() }
+                                .padding(vertical = 15.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(displayName, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                if (isThisConnected) Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(ok))
+                                Text(if (isThisConnected) "Connected" else "Paired", fontSize = 13.5.sp, color = mute)
+                            }
+                        }
+                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+                    }
+                }
+
+                Text(
+                    "+ Add new device", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink,
+                    modifier = Modifier.fillMaxWidth().clickable { onNavigateToPairingGuide() }.padding(vertical = 16.dp)
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+
+                Text(
+                    "Reset to defaults", fontSize = 14.sp, color = mute, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        onSensitivityChange(1.3f); onTapToClickChange(true); onNaturalScrollChange(false)
+                        onHapticsChange(true); onRippleChange(true); onStatusBarAutoHideChange(true)
+                        onUiThemeChange("dark"); onTrackpadThemeChange("graphite"); onKeyboardLayoutChange("qwerty")
+                    }.padding(vertical = 16.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Version", fontSize = 15.sp, color = mute)
+                    Text(appVersion, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+                }
             }
         }
     }
@@ -5084,482 +4680,52 @@ private fun SettingsControlsTab(
 private fun SettingsToggleRow(
     title: String,
     description: String,
-    icon: ImageVector,
-    iconColor: Color,
-    iconBgColor: Color,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    text1: Color,
-    text3: Color,
-    accent: Color,
-    toggleOff: Color,
-    border: Color
+    ink: Color,
+    mute: Color,
+    line: Color,
+    acc: Color,
+    trackBg: Color,
+    thumbCol: Color
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 14.dp),
+            .padding(vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Icon box
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(11.dp))
-                .background(iconBgColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = iconColor,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = text1,
-                lineHeight = 18.sp
-            )
-            Text(
-                description,
-                fontSize = 11.sp,
-                color = text3,
-                lineHeight = 14.sp,
-                maxLines = 1
-            )
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+            Text(description, fontSize = 13.sp, color = mute, lineHeight = 18.sp, modifier = Modifier.padding(top = 1.dp))
         }
-        Spacer(modifier = Modifier.width(8.dp))
-        // Custom toggle - 46x28, rounded 14, thumb 22dp
-        val toggleBg by animateColorAsState(
-            targetValue = if (checked) accent else toggleOff,
-            animationSpec = tween(200),
-            label = "toggleBg"
-        )
-        val thumbOffset by animateFloatAsState(
-            targetValue = if (checked) 1f else 0f,
-            animationSpec = tween(200),
-            label = "thumbOffset"
+        Spacer(modifier = Modifier.width(16.dp))
+        val toggleBg by animateColorAsState(if (checked) acc else trackBg, tween(300), label = "tb")
+        val thumbOff by animateFloatAsState(
+            if (checked) 1f else 0f,
+            spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow), label = "to"
         )
         Box(
             modifier = Modifier
-                .width(46.dp)
-                .height(28.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .width(40.dp)
+                .height(24.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(toggleBg)
                 .clickable { onCheckedChange(!checked) }
-                .padding(3.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(22.dp)
-                    .offset(x = (18 * thumbOffset).dp)
-                    .shadow(4.dp, CircleShape)
+                    .padding(3.dp)
+                    .size(18.dp)
+                    .offset(x = (16 * thumbOff).dp)
                     .clip(CircleShape)
-                    .background(Color.White)
+                    .background(if (checked) thumbCol else Color.White)
             )
         }
     }
+    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
 }
 
-// ── Gestures Tab ──
-
-@Composable
-private fun SettingsGesturesTab(
-    isDark: Boolean,
-    surface1: Color,
-    accent: Color,
-    accentSoft: Color,
-    text1: Color,
-    text2: Color,
-    text3: Color,
-    border: Color
-) {
-    val cardShape = RoundedCornerShape(16.dp)
-
-    gestureData.forEach { (sectionKey, entries) ->
-        val fingerCount = sectionKey.first().digitToIntOrNull() ?: 1
-        val sectionLabel = when (fingerCount) {
-            1 -> "One finger"
-            2 -> "Two fingers"
-            3 -> "Three fingers"
-            4 -> "Four fingers"
-            else -> "$fingerCount fingers"
-        }
-
-        // Section header with finger dots
-        Row(
-            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp, start = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                repeat(fingerCount) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(accent)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = sectionLabel,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = text2,
-                letterSpacing = 0.3.sp
-            )
-        }
-
-        if (fingerCount == 3 && entries.isEmpty()) {
-            // "No gestures assigned" placeholder
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(cardShape)
-                    .background(surface1)
-                    .border(0.5.dp, border, cardShape)
-                    .padding(vertical = 24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No gestures assigned", fontSize = 13.sp, color = text3)
-            }
-        } else {
-            // 2-column grid of gesture cards
-            val chunked = entries.chunked(2)
-            chunked.forEach { rowEntries ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    rowEntries.forEach { entry ->
-                        val isWide = entry.gesture.contains("hold")
-                        Box(
-                            modifier = Modifier
-                                .then(if (isWide && rowEntries.size == 1) Modifier.fillMaxWidth() else Modifier.weight(1f))
-                                .padding(bottom = 8.dp)
-                                .clip(cardShape)
-                                .background(surface1)
-                                .border(0.5.dp, border, cardShape)
-                                .padding(12.dp)
-                        ) {
-                            if (isWide) {
-                                // Wide card: row layout (icon left, text right)
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(46.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(accentSoft),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = gestureIcon(entry.gesture, entry.action),
-                                            contentDescription = null,
-                                            tint = accent,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(
-                                            text = entry.gesture,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = text1,
-                                            lineHeight = 17.sp
-                                        )
-                                        Text(
-                                            text = entry.action,
-                                            fontSize = 11.sp,
-                                            color = text3,
-                                            lineHeight = 14.sp
-                                        )
-                                    }
-                                }
-                            } else {
-                                // Normal card: column layout
-                                Column {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(44.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(accentSoft),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = gestureIcon(entry.gesture, entry.action),
-                                            contentDescription = null,
-                                            tint = accent,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = entry.gesture,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = text1
-                                    )
-                                    Text(
-                                        text = entry.action,
-                                        fontSize = 11.sp,
-                                        color = text3
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    // Fill empty space if odd number
-                    if (rowEntries.size == 1 && !rowEntries[0].gesture.contains("hold")) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── More Tab ──
-
-@SuppressLint("MissingPermission")
-@Composable
-private fun SettingsMoreTab(
-    bondedDevices: List<BluetoothDevice>,
-    isConnected: Boolean,
-    connectedDeviceAddress: String?,
-    deviceNicknames: Map<String, String>,
-    onOpenDeviceManager: () -> Unit,
-    onNavigateToPairingGuide: () -> Unit,
-    appVersion: String,
-    isDark: Boolean,
-    surface1: Color,
-    accent: Color,
-    accentLight: Color,
-    green: Color,
-    text1: Color,
-    text2: Color,
-    text3: Color,
-    border: Color,
-    success: Color,
-    successSoft: Color,
-    devBg: Color,
-    devConn: Color,
-    dashedColor: Color
-) {
-    val context = LocalContext.current
-    val cardShape = RoundedCornerShape(16.dp)
-
-    // ── Devices section ──
-    Text(
-        "DEVICES",
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = text3,
-        letterSpacing = 0.6.sp,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-    )
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .background(surface1)
-            .border(0.5.dp, border, cardShape)
-    ) {
-        if (bondedDevices.isEmpty()) {
-            Text(
-                "No paired devices",
-                fontSize = 13.sp,
-                color = text2,
-                modifier = Modifier.padding(16.dp)
-            )
-        } else {
-            bondedDevices.take(3).forEachIndexed { index, device ->
-                val nickname = deviceNicknames[device.address]
-                val displayName = nickname ?: device.name ?: device.address
-                val isThisConnected = device.address == connectedDeviceAddress
-                if (index > 0) Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(if (isThisConnected) Modifier.background(devConn) else Modifier)
-                        .clickable { onOpenDeviceManager() }
-                        .padding(horizontal = 14.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Device icon
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isThisConnected) successSoft else devBg),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Computer,
-                            contentDescription = null,
-                            tint = if (isThisConnected) success else text3,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            displayName,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = text1,
-                            lineHeight = 18.sp
-                        )
-                        Text(
-                            if (isThisConnected) "Connected" else "Paired",
-                            fontSize = 12.sp,
-                            color = if (isThisConnected) success else text3,
-                            lineHeight = 15.sp
-                        )
-                    }
-                    // Chevron
-                    Icon(
-                        imageVector = Icons.Outlined.ChevronRight,
-                        contentDescription = null,
-                        tint = text3,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-    }
-
-    // Add new device button - OUTSIDE the card, dashed border
-    Spacer(modifier = Modifier.height(10.dp))
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .drawBehind {
-                drawRoundRect(
-                    color = dashedColor,
-                    cornerRadius = CornerRadius(16.dp.toPx()),
-                    style = Stroke(
-                        width = 1.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 4.dp.toPx()))
-                    )
-                )
-            }
-            .clickable { onNavigateToPairingGuide() }
-            .padding(14.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Add,
-                contentDescription = null,
-                tint = accentLight,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                "Add new device",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = accentLight
-            )
-        }
-    }
-
-    Spacer(modifier = Modifier.height(20.dp))
-
-    // ── About section ──
-    Text(
-        "ABOUT",
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = text3,
-        letterSpacing = 0.6.sp,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-    )
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .background(surface1)
-            .border(0.5.dp, border, cardShape)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("Version", fontSize = 14.sp, color = text2)
-            Text(appVersion, fontSize = 14.sp, color = text3)
-        }
-
-        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
-
-        // Send feedback link row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable {
-                    val intent = Intent(Intent.ACTION_SENDTO).apply {
-                        data = Uri.parse("mailto:iammd.uzair@gmail.com")
-                        putExtra(Intent.EXTRA_SUBJECT, "PhonePad Feedback")
-                    }
-                    try { context.startActivity(intent) } catch (_: Exception) {}
-                }
-                .padding(horizontal = 15.dp, vertical = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Send feedback", color = accentLight, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Icon(
-                imageVector = Icons.Outlined.ChevronRight,
-                contentDescription = null,
-                tint = text3,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-
-        Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(border))
-
-        // Rate PhonePad link row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable {
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${context.packageName}"))
-                        context.startActivity(intent)
-                    } catch (_: Exception) {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}"))
-                            context.startActivity(intent)
-                        } catch (_: Exception) {}
-                    }
-                }
-                .padding(horizontal = 15.dp, vertical = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Rate PhonePad", color = accentLight, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Icon(
-                imageVector = Icons.Outlined.ChevronRight,
-                contentDescription = null,
-                tint = text3,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-    }
-}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Phase 4.1 — Device Manager
@@ -6385,6 +5551,226 @@ object KeyboardLayouts {
             )
         )
     )
+    // ── AZERTY (French) — full keyboard ──
+    val FULL_AZERTY = KeyboardLayout(
+        rows = listOf(
+            FULL_QWERTY.rows[0], // Media row (same)
+            FULL_QWERTY.rows[1], // Number row (same HID, labels match host)
+            // Row 2: AZERTY
+            listOf(
+                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
+                KeyDef("a", "A", S.KEY_Q), KeyDef("z", "Z", S.KEY_W),
+                KeyDef("e", "E", S.KEY_E), KeyDef("r", "R", S.KEY_R),
+                KeyDef("t", "T", S.KEY_T), KeyDef("y", "Y", S.KEY_Y),
+                KeyDef("u", "U", S.KEY_U), KeyDef("i", "I", S.KEY_I),
+                KeyDef("o", "O", S.KEY_O), KeyDef("p", "P", S.KEY_P),
+                KeyDef("[", "{", S.KEY_LBRACKET), KeyDef("]", "}", S.KEY_RBRACKET),
+                KeyDef("\\", "|", S.KEY_BACKSLASH, 1.25f)
+            ),
+            // Row 3: Home row
+            listOf(
+                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
+                KeyDef("q", "Q", S.KEY_A), KeyDef("s", "S", S.KEY_S),
+                KeyDef("d", "D", S.KEY_D), KeyDef("f", "F", S.KEY_F),
+                KeyDef("g", "G", S.KEY_G), KeyDef("h", "H", S.KEY_H),
+                KeyDef("j", "J", S.KEY_J), KeyDef("k", "K", S.KEY_K),
+                KeyDef("l", "L", S.KEY_L), KeyDef("m", "M", S.KEY_SEMICOLON),
+                KeyDef("'", "\"", S.KEY_APOSTROPHE),
+                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
+            ),
+            // Row 4: Bottom row
+            listOf(
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
+                KeyDef("w", "W", S.KEY_Z), KeyDef("x", "X", S.KEY_X),
+                KeyDef("c", "C", S.KEY_C), KeyDef("v", "V", S.KEY_V),
+                KeyDef("b", "B", S.KEY_B), KeyDef("n", "N", S.KEY_N),
+                KeyDef(",", "<", S.KEY_M), KeyDef(";", ":", S.KEY_COMMA),
+                KeyDef(".", ">", S.KEY_PERIOD), KeyDef("/", "?", S.KEY_SLASH),
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
+            ),
+            FULL_QWERTY.rows[5] // Space row (same)
+        )
+    )
+
+    // ── QWERTZ (German) — full keyboard ──
+    val FULL_QWERTZ = KeyboardLayout(
+        rows = listOf(
+            FULL_QWERTY.rows[0],
+            FULL_QWERTY.rows[1],
+            // Row 2: QWERTZ
+            listOf(
+                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
+                KeyDef("q", "Q", S.KEY_Q), KeyDef("w", "W", S.KEY_W),
+                KeyDef("e", "E", S.KEY_E), KeyDef("r", "R", S.KEY_R),
+                KeyDef("t", "T", S.KEY_T), KeyDef("z", "Z", S.KEY_Y),
+                KeyDef("u", "U", S.KEY_U), KeyDef("i", "I", S.KEY_I),
+                KeyDef("o", "O", S.KEY_O), KeyDef("p", "P", S.KEY_P),
+                KeyDef("ü", "Ü", S.KEY_LBRACKET), KeyDef("+", "*", S.KEY_RBRACKET),
+                KeyDef("#", "'", S.KEY_BACKSLASH, 1.25f)
+            ),
+            // Row 3: Home row
+            listOf(
+                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
+                KeyDef("a", "A", S.KEY_A), KeyDef("s", "S", S.KEY_S),
+                KeyDef("d", "D", S.KEY_D), KeyDef("f", "F", S.KEY_F),
+                KeyDef("g", "G", S.KEY_G), KeyDef("h", "H", S.KEY_H),
+                KeyDef("j", "J", S.KEY_J), KeyDef("k", "K", S.KEY_K),
+                KeyDef("l", "L", S.KEY_L), KeyDef("ö", "Ö", S.KEY_SEMICOLON),
+                KeyDef("ä", "Ä", S.KEY_APOSTROPHE),
+                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
+            ),
+            // Row 4: Bottom row
+            listOf(
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
+                KeyDef("y", "Y", S.KEY_Z), KeyDef("x", "X", S.KEY_X),
+                KeyDef("c", "C", S.KEY_C), KeyDef("v", "V", S.KEY_V),
+                KeyDef("b", "B", S.KEY_B), KeyDef("n", "N", S.KEY_N),
+                KeyDef("m", "M", S.KEY_M), KeyDef(",", ";", S.KEY_COMMA),
+                KeyDef(".", ":", S.KEY_PERIOD), KeyDef("-", "_", S.KEY_SLASH),
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
+            ),
+            FULL_QWERTY.rows[5]
+        )
+    )
+
+    // ── Dvorak — full keyboard ──
+    val FULL_DVORAK = KeyboardLayout(
+        rows = listOf(
+            FULL_QWERTY.rows[0],
+            FULL_QWERTY.rows[1],
+            // Row 2: Dvorak top
+            listOf(
+                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
+                KeyDef("'", "\"", S.KEY_Q), KeyDef(",", "<", S.KEY_W),
+                KeyDef(".", ">", S.KEY_E), KeyDef("p", "P", S.KEY_R),
+                KeyDef("y", "Y", S.KEY_T), KeyDef("f", "F", S.KEY_Y),
+                KeyDef("g", "G", S.KEY_U), KeyDef("c", "C", S.KEY_I),
+                KeyDef("r", "R", S.KEY_O), KeyDef("l", "L", S.KEY_P),
+                KeyDef("/", "?", S.KEY_LBRACKET), KeyDef("=", "+", S.KEY_RBRACKET),
+                KeyDef("\\", "|", S.KEY_BACKSLASH, 1.25f)
+            ),
+            // Row 3: Home row
+            listOf(
+                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
+                KeyDef("a", "A", S.KEY_A), KeyDef("o", "O", S.KEY_S),
+                KeyDef("e", "E", S.KEY_D), KeyDef("u", "U", S.KEY_F),
+                KeyDef("i", "I", S.KEY_G), KeyDef("d", "D", S.KEY_H),
+                KeyDef("h", "H", S.KEY_J), KeyDef("t", "T", S.KEY_K),
+                KeyDef("n", "N", S.KEY_L), KeyDef("s", "S", S.KEY_SEMICOLON),
+                KeyDef("-", "_", S.KEY_APOSTROPHE),
+                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
+            ),
+            // Row 4: Bottom row
+            listOf(
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
+                KeyDef(";", ":", S.KEY_Z), KeyDef("q", "Q", S.KEY_X),
+                KeyDef("j", "J", S.KEY_C), KeyDef("k", "K", S.KEY_V),
+                KeyDef("x", "X", S.KEY_B), KeyDef("b", "B", S.KEY_N),
+                KeyDef("m", "M", S.KEY_M), KeyDef("w", "W", S.KEY_COMMA),
+                KeyDef("v", "V", S.KEY_PERIOD), KeyDef("z", "Z", S.KEY_SLASH),
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
+            ),
+            FULL_QWERTY.rows[5]
+        )
+    )
+
+    // ── Colemak — full keyboard ──
+    val FULL_COLEMAK = KeyboardLayout(
+        rows = listOf(
+            FULL_QWERTY.rows[0],
+            FULL_QWERTY.rows[1],
+            // Row 2: Colemak top
+            listOf(
+                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
+                KeyDef("q", "Q", S.KEY_Q), KeyDef("w", "W", S.KEY_W),
+                KeyDef("f", "F", S.KEY_E), KeyDef("p", "P", S.KEY_R),
+                KeyDef("g", "G", S.KEY_T), KeyDef("j", "J", S.KEY_Y),
+                KeyDef("l", "L", S.KEY_U), KeyDef("u", "U", S.KEY_I),
+                KeyDef("y", "Y", S.KEY_O), KeyDef(";", ":", S.KEY_P),
+                KeyDef("[", "{", S.KEY_LBRACKET), KeyDef("]", "}", S.KEY_RBRACKET),
+                KeyDef("\\", "|", S.KEY_BACKSLASH, 1.25f)
+            ),
+            // Row 3: Home row
+            listOf(
+                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
+                KeyDef("a", "A", S.KEY_A), KeyDef("r", "R", S.KEY_S),
+                KeyDef("s", "S", S.KEY_D), KeyDef("t", "T", S.KEY_F),
+                KeyDef("d", "D", S.KEY_G), KeyDef("h", "H", S.KEY_H),
+                KeyDef("n", "N", S.KEY_J), KeyDef("e", "E", S.KEY_K),
+                KeyDef("i", "I", S.KEY_L), KeyDef("o", "O", S.KEY_SEMICOLON),
+                KeyDef("'", "\"", S.KEY_APOSTROPHE),
+                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
+            ),
+            // Row 4: Bottom row
+            listOf(
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
+                KeyDef("z", "Z", S.KEY_Z), KeyDef("x", "X", S.KEY_X),
+                KeyDef("c", "C", S.KEY_C), KeyDef("v", "V", S.KEY_V),
+                KeyDef("b", "B", S.KEY_B), KeyDef("k", "K", S.KEY_N),
+                KeyDef("m", "M", S.KEY_M), KeyDef(",", "<", S.KEY_COMMA),
+                KeyDef(".", ">", S.KEY_PERIOD), KeyDef("/", "?", S.KEY_SLASH),
+                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
+            ),
+            FULL_QWERTY.rows[5]
+        )
+    )
+
+    fun fullLayoutFromName(name: String): KeyboardLayout = when (name) {
+        "azerty" -> FULL_AZERTY
+        "qwertz" -> FULL_QWERTZ
+        "dvorak" -> FULL_DVORAK
+        "colemak" -> FULL_COLEMAK
+        else -> FULL_QWERTY
+    }
+
+    val LAYOUT_OPTIONS = listOf(
+        "qwerty" to "QWERTY",
+        "azerty" to "AZERTY",
+        "qwertz" to "QWERTZ",
+        "dvorak" to "Dvorak",
+        "colemak" to "Colemak"
+    )
+}
+
+// Keyboard Shortcuts data for overlay (Milestone 5.1)
+object KeyboardShortcuts {
+    data class Shortcut(val keys: String, val description: String)
+
+    val CTRL_SHORTCUTS = listOf(
+        Shortcut("Ctrl + C", "Copy"),
+        Shortcut("Ctrl + V", "Paste"),
+        Shortcut("Ctrl + X", "Cut"),
+        Shortcut("Ctrl + Z", "Undo"),
+        Shortcut("Ctrl + Y", "Redo"),
+        Shortcut("Ctrl + A", "Select all"),
+        Shortcut("Ctrl + S", "Save"),
+        Shortcut("Ctrl + F", "Find"),
+        Shortcut("Ctrl + P", "Print"),
+        Shortcut("Ctrl + N", "New"),
+        Shortcut("Ctrl + W", "Close tab"),
+        Shortcut("Ctrl + T", "New tab")
+    )
+
+    val WIN_SHORTCUTS = listOf(
+        Shortcut("Win + D", "Show desktop"),
+        Shortcut("Win + E", "File explorer"),
+        Shortcut("Win + L", "Lock screen"),
+        Shortcut("Win + Tab", "Task view"),
+        Shortcut("Win + I", "Settings"),
+        Shortcut("Win + R", "Run dialog"),
+        Shortcut("Win + S", "Search"),
+        Shortcut("Win + V", "Clipboard"),
+        Shortcut("Win + ←/→", "Snap window"),
+        Shortcut("Win + ↑/↓", "Maximize/Minimize")
+    )
+
+    val ALT_SHORTCUTS = listOf(
+        Shortcut("Alt + Tab", "Switch apps"),
+        Shortcut("Alt + F4", "Close window"),
+        Shortcut("Alt + Enter", "Properties"),
+        Shortcut("Alt + ←", "Back"),
+        Shortcut("Alt + →", "Forward")
+    )
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -6517,6 +5903,7 @@ fun KeyboardScreen(
     val isShifted = shiftState != ShiftState.OFF
     var fnHeld by remember { mutableStateOf(false) }
     var lastSpaceTime by remember { mutableStateOf(0L) }
+    var shortcutsOverlayModifier by remember { mutableStateOf("") }
 
     val surfaceBg = theme.surface
     val keyGap = layout.keyGapDp.dp
@@ -6649,6 +6036,17 @@ fun KeyboardScreen(
                                                     heldModifiers.add(key.modByte)
                                                     keyboardEngine.pressModifier(key.modByte)
                                                 }
+                                                val overlayName = when (key.label) {
+                                                    "Ctrl" -> "Ctrl"
+                                                    "Win" -> "Win"
+                                                    "Alt" -> "Alt"
+                                                    else -> ""
+                                                }
+                                                if (overlayName.isNotEmpty()) {
+                                                    val overlayRunnable = Runnable { shortcutsOverlayModifier = overlayName }
+                                                    handler.postDelayed(overlayRunnable, 1000)
+                                                    repeatRunnable = overlayRunnable
+                                                }
                                             }
                                             key.type == KeyType.FN -> fnHeld = !fnHeld
                                             key.type == KeyType.ACTION -> {
@@ -6725,7 +6123,9 @@ fun KeyboardScreen(
 
                                         // Release
                                         when {
-                                            key.type == KeyType.SHIFT || key.type == KeyType.MODIFIER || key.type == KeyType.FN || key.type == KeyType.ACTION -> {}
+                                            key.type == KeyType.SHIFT || key.type == KeyType.MODIFIER || key.type == KeyType.FN || key.type == KeyType.ACTION -> {
+                                                if (key.type == KeyType.MODIFIER) shortcutsOverlayModifier = ""
+                                            }
                                             isConsumer && !fnHeld -> onConsumerRelease()
                                             isConsumer && fnHeld && key.fnHid != 0.toByte() -> {
                                                 keyboardEngine.releaseKey(key.fnHid)
@@ -6795,6 +6195,11 @@ fun KeyboardScreen(
                 }
             }
         }
+        ShortcutsOverlay(
+            modifierName = shortcutsOverlayModifier,
+            isVisible = shortcutsOverlayModifier.isNotEmpty(),
+            theme = theme
+        )
     }
 }
 
@@ -7238,61 +6643,92 @@ fun ModePopup(
     )
 
     @Composable
-    fun PopupOptions() {
+    fun ModeIcon(mode: AppScreen, isActive: Boolean) {
+        Canvas(modifier = Modifier.size(20.dp)) {
+            val w = size.width; val h = size.height
+            val iconColor = if (isActive) Color.White else Color.White.copy(alpha = 0.45f)
+            val stroke = if (isActive) 2f else 1.5f
+            when (mode) {
+                AppScreen.TRACKPAD -> {
+                    drawRoundRect(iconColor, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.84f), CornerRadius(w * 0.12f), style = Stroke(stroke))
+                    if (isActive) drawCircle(Color.White, w * 0.06f, Offset(w * 0.55f, h * 0.45f))
+                }
+                AppScreen.KEYBOARD -> {
+                    drawRoundRect(iconColor, Offset(w * 0.1f, h * 0.15f), Size(w * 0.8f, h * 0.7f), CornerRadius(w * 0.08f), style = Stroke(stroke))
+                    for (r in 0..2) for (c in 0..(if (r == 2) 4 else 5)) {
+                        val cols = if (r == 2) 5 else 6
+                        val kw = w * 0.08f; val kh = h * 0.1f
+                        val startX = w * 0.5f - (cols * kw + (cols - 1) * w * 0.04f) / 2f
+                        drawRoundRect(iconColor, Offset(startX + c * (kw + w * 0.04f), h * (0.24f + r * 0.2f)), Size(kw, kh), CornerRadius(w * 0.015f), style = if (isActive) Fill else Stroke(stroke * 0.6f))
+                    }
+                }
+                AppScreen.SPLIT -> {
+                    drawRoundRect(iconColor, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.84f), CornerRadius(w * 0.1f), style = Stroke(stroke))
+                    drawLine(iconColor, Offset(w * 0.18f, h * 0.5f), Offset(w * 0.82f, h * 0.5f), strokeWidth = stroke)
+                }
+                else -> {}
+            }
+        }
+    }
+
+    @Composable
+    fun PillBar() {
+        val expandFrom = if (dropDown) Alignment.CenterHorizontally else Alignment.End
         AnimatedVisibility(
             visible = isVisible,
-            enter = fadeIn(tween(150)) + slideInVertically(tween(200)) { if (dropDown) -it / 2 else it / 2 },
-            exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { if (dropDown) -it / 2 else it / 2 }
+            enter = fadeIn(tween(180)) + expandHorizontally(
+                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = 500f),
+                expandFrom = expandFrom
+            ),
+            exit = fadeOut(tween(160)) + shrinkHorizontally(
+                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                shrinkTowards = expandFrom
+            )
         ) {
-            Column(
+            Row(
                 modifier = Modifier
-                    .then(if (dropDown) Modifier.padding(top = 8.dp) else Modifier.padding(bottom = 8.dp))
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF1A1A24))
-                    .border(0.5.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
-                    .padding(6.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                    .then(if (dropDown) Modifier.padding(top = 8.dp) else Modifier.padding(bottom = 10.dp))
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFF1C1C28).copy(alpha = 0.95f))
+                    .border(0.5.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(50))
+                    .padding(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 modes.forEach { (mode, label, _) ->
                     val isActive = mode == currentMode
-                    val bg by animateColorAsState(
+                    val pillBg by animateColorAsState(
                         if (isActive) accent else Color.Transparent,
-                        animationSpec = tween(200), label = "mode-bg"
+                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 600f), label = "pill"
                     )
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(bg)
+                            .clip(RoundedCornerShape(50))
+                            .background(pillBg)
                             .clickable { onModeSelected(mode) }
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(
+                                start = if (isActive) 14.dp else 13.dp,
+                                end = if (isActive) 18.dp else 13.dp,
+                                top = 10.dp,
+                                bottom = 10.dp
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Canvas(modifier = Modifier.size(18.dp)) {
-                            val w = size.width; val h = size.height
-                            val iconColor = if (isActive) Color.White else Color.White.copy(alpha = 0.5f)
-                            val stroke = if (isActive) 2f else 1.5f
-                            when (mode) {
-                                AppScreen.TRACKPAD -> {
-                                    drawRoundRect(iconColor, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.84f), CornerRadius(w * 0.12f), style = Stroke(stroke))
-                                    if (isActive) drawCircle(Color.White, w * 0.06f, Offset(w * 0.55f, h * 0.45f))
-                                }
-                                AppScreen.KEYBOARD -> {
-                                    for (r in 0..2) for (c in 0..2) drawRoundRect(iconColor, Offset(w * (0.12f + c * 0.3f), h * (0.12f + r * 0.3f)), Size(w * 0.18f, h * 0.14f), CornerRadius(w * 0.03f), style = if (isActive) Fill else Stroke(stroke))
-                                }
-                                AppScreen.SPLIT -> {
-                                    drawRoundRect(iconColor, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.84f), CornerRadius(w * 0.1f), style = Stroke(stroke))
-                                    drawLine(iconColor, Offset(w * 0.18f, h * 0.5f), Offset(w * 0.82f, h * 0.5f), strokeWidth = stroke)
-                                }
-                                else -> {}
-                            }
+                        ModeIcon(mode, isActive)
+                        AnimatedVisibility(
+                            visible = isActive,
+                            enter = fadeIn(tween(220)) + expandHorizontally(tween(220), expandFrom = Alignment.Start),
+                            exit = fadeOut(tween(120)) + shrinkHorizontally(tween(160), shrinkTowards = Alignment.Start)
+                        ) {
+                            Text(
+                                text = label,
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
                         }
-                        Text(
-                            text = label,
-                            color = if (isActive) Color.White else Color.White.copy(alpha = 0.6f),
-                            fontSize = 13.sp,
-                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal
-                        )
                     }
                 }
             }
@@ -7301,51 +6737,100 @@ fun ModePopup(
 
     @Composable
     fun TriggerButton() {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(
-                    if (isVisible) accent.copy(alpha = 0.2f)
-                    else Color.White.copy(alpha = 0.06f)
-                )
-                .border(
-                    0.5.dp,
-                    if (isVisible) accent.copy(alpha = 0.5f)
-                    else Color.White.copy(alpha = 0.08f),
-                    RoundedCornerShape(12.dp)
-                )
-                .clickable { onToggle() },
-            contentAlignment = Alignment.Center
+        AnimatedVisibility(
+            visible = !isVisible,
+            enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.7f),
+            exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.7f)
         ) {
-            Canvas(modifier = Modifier.size(22.dp)) {
-                val w = size.width; val h = size.height
-                val c = if (isVisible) Color.White else Color.White.copy(alpha = 0.45f)
-                // Mouse icon: body + scroll wheel + buttons divider
-                val bodyTop = h * 0.08f; val bodyBot = h * 0.92f
-                val bodyLeft = w * 0.2f; val bodyRight = w * 0.8f
-                val bodyW = bodyRight - bodyLeft; val bodyH = bodyBot - bodyTop
-                drawRoundRect(c, Offset(bodyLeft, bodyTop), Size(bodyW, bodyH), CornerRadius(bodyW * 0.45f), style = Stroke(1.6f))
-                // Center divider line (top half only)
-                drawLine(c, Offset(w * 0.5f, bodyTop + bodyH * 0.05f), Offset(w * 0.5f, bodyTop + bodyH * 0.35f), strokeWidth = 1.2f)
-                // Scroll wheel
-                drawRoundRect(c, Offset(w * 0.44f, bodyTop + bodyH * 0.12f), Size(w * 0.12f, bodyH * 0.16f), CornerRadius(w * 0.03f), style = Stroke(1.2f))
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.07f))
+                    .border(0.5.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                    .clickable { onToggle() },
+                contentAlignment = Alignment.Center
+            ) {
+                ModeIcon(currentMode, true)
             }
         }
     }
 
     Box(modifier = modifier) {
-        if (dropDown) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            horizontalAlignment = if (dropDown) Alignment.CenterHorizontally else Alignment.End
+        ) {
+            if (dropDown) {
                 if (showTrigger) TriggerButton()
-                PopupOptions()
-            }
-        } else {
-            Column(horizontalAlignment = Alignment.End) {
-                PopupOptions()
+                PillBar()
+            } else {
+                PillBar()
                 if (showTrigger) TriggerButton()
             }
         }
     }
+}
 
+@Composable
+fun ShortcutsOverlay(
+    modifierName: String,
+    isVisible: Boolean,
+    theme: AppThemeColors = AppThemes.Midnight
+) {
+    val shortcuts = when (modifierName) {
+        "Ctrl" -> KeyboardShortcuts.CTRL_SHORTCUTS
+        "Win" -> KeyboardShortcuts.WIN_SHORTCUTS
+        "Alt" -> KeyboardShortcuts.ALT_SHORTCUTS
+        else -> emptyList()
+    }
+    AnimatedVisibility(
+        visible = isVisible && shortcuts.isNotEmpty(),
+        enter = fadeIn(tween(200)),
+        exit = fadeOut(tween(150))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.75f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(theme.surface.copy(alpha = 0.95f))
+                    .border(0.5.dp, theme.keyBorder, RoundedCornerShape(20.dp))
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    "$modifierName Shortcuts",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = theme.accent,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                shortcuts.forEach { shortcut ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            shortcut.keys,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = theme.textPrimary
+                        )
+                        Text(
+                            shortcut.description,
+                            fontSize = 13.sp,
+                            color = theme.textSecondary
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
