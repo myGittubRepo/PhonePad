@@ -899,14 +899,14 @@ class MainActivity : ComponentActivity() {
                         targetState = currentScreen,
                         transitionSpec = {
                             if (initialState == AppScreen.SPLASH) {
-                                (fadeIn(tween(600)) + slideInVertically { -it / 12 }) togetherWith
-                                    fadeOut(tween(500))
+                                (fadeIn(tween(350)) + slideInVertically { -it / 16 }) togetherWith
+                                    fadeOut(tween(250))
                             } else if (targetState == AppScreen.TRACKPAD) {
-                                (fadeIn(tween(400)) + slideInHorizontally { it / 4 }) togetherWith
-                                    (fadeOut(tween(300)) + slideOutHorizontally { -it / 4 })
+                                (fadeIn(tween(180)) + slideInHorizontally { it / 6 }) togetherWith
+                                    (fadeOut(tween(120)) + slideOutHorizontally { -it / 6 })
                             } else {
-                                (fadeIn(tween(350)) + slideInHorizontally { it / 6 }) togetherWith
-                                    (fadeOut(tween(250)) + slideOutHorizontally { -it / 6 })
+                                (fadeIn(tween(160)) + slideInHorizontally { it / 8 }) togetherWith
+                                    (fadeOut(tween(100)) + slideOutHorizontally { -it / 8 })
                             }
                         },
                         label = "screen"
@@ -1098,8 +1098,8 @@ class MainActivity : ComponentActivity() {
                                         // Scrim / dismiss overlay (dark backdrop in keyboard mode)
                                         AnimatedVisibility(
                                             visible = showModePopup,
-                                            enter = fadeIn(tween(200)),
-                                            exit = fadeOut(tween(200))
+                                            enter = fadeIn(tween(100)),
+                                            exit = fadeOut(tween(80))
                                         ) {
                                             Box(
                                                 modifier = Modifier
@@ -4034,8 +4034,8 @@ fun TrackpadScreen(
         // Settings overlay (full-screen)
         AnimatedVisibility(
             visible = showSettings,
-            enter = fadeIn(tween(300)),
-            exit = fadeOut(tween(300))
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(100))
         ) {
             SettingsOverlay(
                 onDismiss = onToggleSettings,
@@ -4260,7 +4260,7 @@ private fun SettingsOverlay(
 
     val slideAnim = remember { Animatable(1f) }
     LaunchedEffect(Unit) {
-        slideAnim.animateTo(0f, tween(550, easing = EaseOutCubic))
+        slideAnim.animateTo(0f, tween(250, easing = EaseOutCubic))
     }
 
     val scrollState = rememberScrollState()
@@ -6676,12 +6676,12 @@ fun ModePopup(
         val expandFrom = if (dropDown) Alignment.CenterHorizontally else Alignment.End
         AnimatedVisibility(
             visible = isVisible,
-            enter = fadeIn(tween(180)) + expandHorizontally(
-                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = 500f),
+            enter = fadeIn(tween(80)) + expandHorizontally(
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 1200f),
                 expandFrom = expandFrom
             ),
-            exit = fadeOut(tween(160)) + shrinkHorizontally(
-                animationSpec = tween(220, easing = FastOutSlowInEasing),
+            exit = fadeOut(tween(80)) + shrinkHorizontally(
+                animationSpec = tween(120, easing = FastOutSlowInEasing),
                 shrinkTowards = expandFrom
             )
         ) {
@@ -6699,7 +6699,7 @@ fun ModePopup(
                     val isActive = mode == currentMode
                     val pillBg by animateColorAsState(
                         if (isActive) accent else Color.Transparent,
-                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 600f), label = "pill"
+                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 1500f), label = "pill"
                     )
                     Row(
                         modifier = Modifier
@@ -6718,8 +6718,8 @@ fun ModePopup(
                         ModeIcon(mode, isActive)
                         AnimatedVisibility(
                             visible = isActive,
-                            enter = fadeIn(tween(220)) + expandHorizontally(tween(220), expandFrom = Alignment.Start),
-                            exit = fadeOut(tween(120)) + shrinkHorizontally(tween(160), shrinkTowards = Alignment.Start)
+                            enter = fadeIn(tween(100)) + expandHorizontally(tween(100), expandFrom = Alignment.Start),
+                            exit = fadeOut(tween(60)) + shrinkHorizontally(tween(80), shrinkTowards = Alignment.Start)
                         ) {
                             Text(
                                 text = label,
@@ -6739,8 +6739,8 @@ fun ModePopup(
     fun TriggerButton() {
         AnimatedVisibility(
             visible = !isVisible,
-            enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.7f),
-            exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.7f)
+            enter = fadeIn(tween(100)) + scaleIn(tween(100), initialScale = 0.8f),
+            exit = fadeOut(tween(60)) + scaleOut(tween(60), targetScale = 0.8f)
         ) {
             Box(
                 modifier = Modifier

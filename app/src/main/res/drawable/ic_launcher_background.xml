@@ -4,7 +4,13 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Warm yellow background -->
     <path
-        android:fillColor="#2B2D6E"
+        android:fillColor="#F5C542"
         android:pathData="M0,0h108v108h-108z" />
+    <!-- Subtle highlight at top -->
+    <path
+        android:fillColor="#FFE07A"
+        android:fillAlpha="0.3"
+        android:pathData="M54,0 A54,40 0 0 1 108,30 L0,30 A54,40 0 0 1 54,0 Z" />
 </vector>
