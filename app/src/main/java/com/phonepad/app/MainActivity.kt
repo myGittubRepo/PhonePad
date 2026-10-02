@@ -32,6 +32,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -90,6 +91,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -179,9 +181,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.drawBehind
@@ -195,21 +199,31 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.animation.core.EaseInOutCubic
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.EaseOutBack
 import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.keyframes
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
 enum class AppScreen {
-    SPLASH, COMPAT_FAIL, ONBOARDING, PERMISSION, PERMISSION_DENIED, PAIRING_GUIDE, TRACKPAD, KEYBOARD, SPLIT
+    SPLASH, SHOWCASE, CONNECT, COMPAT_FAIL, HOME, PERMISSION, PERMISSION_DENIED, TRACKPAD, KEYBOARD, SPLIT
 }
 
 data class AppThemeColors(
@@ -690,8 +704,7 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "Bluetooth permissions granted")
             permissionStatus = "Granted"
             ensureHidSession()
-            val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
-            currentScreen = if (lastHost != null) AppScreen.TRACKPAD else AppScreen.PAIRING_GUIDE
+            currentScreen = AppScreen.HOME
         } else {
             Log.w(TAG, "Bluetooth permissions denied: $results")
             permissionStatus = "Denied"
@@ -889,7 +902,7 @@ class MainActivity : ComponentActivity() {
         }
 
         currentScreen = AppScreen.SPLASH
-        handler.postDelayed({ routeFromSplash() }, 2800L)
+        handler.postDelayed({ routeFromSplash() }, 2600L)
 
         setContent {
             PhonePadTheme {
@@ -915,29 +928,32 @@ class MainActivity : ComponentActivity() {
                             AppScreen.SPLASH -> SplashScreen(
                                 modifier = Modifier.padding(innerPadding)
                             )
+                            AppScreen.SHOWCASE -> ShowcaseScreen(
+                                onFinish = { currentScreen = AppScreen.CONNECT },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                            AppScreen.CONNECT -> ConnectScreen(
+                                onSetupLater = {
+                                    prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
+                                    if (hasBluetoothPermissions()) {
+                                        ensureHidSession()
+                                    }
+                                    currentScreen = AppScreen.HOME
+                                },
+                                modifier = Modifier.padding(innerPadding)
+                            )
                             AppScreen.COMPAT_FAIL -> CompatFailScreen(
                                 deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
                                 modifier = Modifier.padding(innerPadding)
                             )
-                            AppScreen.ONBOARDING -> OnboardingScreen(
-                                onComplete = {
-                                    prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
-                                    if (hasBluetoothPermissions()) {
-                                        ensureHidSession()
-                                        val host = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
-                                        currentScreen = if (host != null) AppScreen.TRACKPAD else AppScreen.PAIRING_GUIDE
-                                    } else {
+                            AppScreen.HOME -> HomeScreen(
+                                isBluetoothConnected = connectedDevice != null,
+                                onModeSelected = { mode ->
+                                    if (!hasBluetoothPermissions()) {
                                         currentScreen = AppScreen.PERMISSION
-                                    }
-                                },
-                                onSkip = {
-                                    prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
-                                    if (hasBluetoothPermissions()) {
-                                        ensureHidSession()
-                                        val host = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
-                                        currentScreen = if (host != null) AppScreen.TRACKPAD else AppScreen.PAIRING_GUIDE
                                     } else {
-                                        currentScreen = AppScreen.PERMISSION
+                                        ensureHidSession()
+                                        currentScreen = mode
                                     }
                                 },
                                 modifier = Modifier.padding(innerPadding)
@@ -951,13 +967,7 @@ class MainActivity : ComponentActivity() {
                                 onTryAgain = { requestBluetoothPermissions() },
                                 modifier = Modifier.padding(innerPadding)
                             )
-                            AppScreen.PAIRING_GUIDE -> PairingGuideScreen(
-                                connectionStatus = connectionStatus,
-                                isConnected = connectedDevice != null,
-                                connectedHostName = connectedDevice?.name,
-                                onNavigateToTrackpad = { currentScreen = AppScreen.TRACKPAD },
-                                modifier = Modifier.padding(innerPadding)
-                            )
+
                             AppScreen.TRACKPAD, AppScreen.KEYBOARD, AppScreen.SPLIT -> {
                                 // Enforce orientation lock on every recomposition
                                 SideEffect {
@@ -1014,7 +1024,7 @@ class MainActivity : ComponentActivity() {
                                                 onNavigateToPairingGuide = {
                                                     showDeviceManager = false
                                                     showSettings = false
-                                                    currentScreen = AppScreen.PAIRING_GUIDE
+                                                    currentScreen = AppScreen.CONNECT
                                                 },
                                                 isBluetoothOff = isBluetoothOff,
                                                 onTurnOnBluetooth = {
@@ -1195,8 +1205,7 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "onResume: permissions granted from Settings, proceeding")
             permissionStatus = "Granted"
             ensureHidSession()
-            val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
-            currentScreen = if (lastHost != null) AppScreen.TRACKPAD else AppScreen.PAIRING_GUIDE
+            currentScreen = AppScreen.HOME
         }
 
         if (connectedDevice == null) {
@@ -1609,24 +1618,15 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (!prefs.getBoolean(PREF_HAS_SEEN_ONBOARDING, false)) {
-            Log.d(TAG, "routeFromSplash: first launch — ONBOARDING")
-            currentScreen = AppScreen.ONBOARDING
+            Log.d(TAG, "routeFromSplash: first launch — SHOWCASE")
+            currentScreen = AppScreen.SHOWCASE
             return
         }
         if (hasBluetoothPermissions()) {
             ensureHidSession()
-            val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
-            if (lastHost != null) {
-                Log.d(TAG, "routeFromSplash: returning user with paired device — TRACKPAD")
-                currentScreen = AppScreen.TRACKPAD
-            } else {
-                Log.d(TAG, "routeFromSplash: returning user, no paired device — PAIRING_GUIDE")
-                currentScreen = AppScreen.PAIRING_GUIDE
-            }
-        } else {
-            Log.d(TAG, "routeFromSplash: returning user, no permissions — PERMISSION")
-            currentScreen = AppScreen.PERMISSION
         }
+        Log.d(TAG, "routeFromSplash: returning user — HOME")
+        currentScreen = AppScreen.HOME
     }
 
     private fun openAppSettings() {
@@ -2640,231 +2640,1160 @@ class KeyboardReportSender(
 
 @Composable
 fun SplashScreen(modifier: Modifier = Modifier) {
-    val trackpadProgress = remember { Animatable(0f) }
-    val cursorProgress = remember { Animatable(0f) }
-    val textAlpha = remember { Animatable(0f) }
-    val textSlide = remember { Animatable(20f) }
-    val glowAlpha = remember { Animatable(0f) }
-    val particleProgress = remember { Animatable(0f) }
+    val pieceEasing = remember { CubicBezierEasing(0.3f, 0.9f, 0.35f, 1f) }
+    val bounceEasing = remember { CubicBezierEasing(0.34f, 1.56f, 0.4f, 1f) }
+    val popEasing = remember { CubicBezierEasing(0.2f, 1.4f, 0.3f, 1f) }
+    val stampEasing = remember { CubicBezierEasing(0.22f, 0.68f, 0.36f, 1.22f) }
 
-    LaunchedEffect(Unit) {
-        launch { trackpadProgress.animateTo(1f, tween(1000, easing = EaseOutCubic)) }
-        delay(400)
-        launch { cursorProgress.animateTo(1f, tween(700, easing = EaseOutBack)) }
-        delay(300)
-        launch { glowAlpha.animateTo(0.6f, tween(600)) }
-        launch { particleProgress.animateTo(1f, tween(1200, easing = EaseOutCubic)) }
-        delay(200)
-        launch { textAlpha.animateTo(1f, tween(500)) }
-        launch { textSlide.animateTo(0f, tween(500, easing = EaseOutCubic)) }
+    val wrapScale = remember { Animatable(0.85f) }
+    val wrapAlpha = remember { Animatable(0f) }
+
+    val cardP = remember { Animatable(0f) }
+    val bgP = remember { (0 until 10).map { Animatable(0f) } }
+    val mainP = remember { (0 until 4).map { Animatable(0f) } }
+    val padP = remember { Animatable(0f) }
+    val cursorP = remember { Animatable(0f) }
+
+    val letters = "Mouskey"
+    val lAlpha = remember { letters.map { Animatable(0f) } }
+    val lScale = remember { letters.map { Animatable(1.8f) } }
+    val lY = remember { letters.map { Animatable(-18f) } }
+
+    val bgLabelPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.CENTER
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        }
+    }
+    val mainLabelPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.CENTER
+            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+        }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "splashGlow")
-    val shimmer by infiniteTransition.animateFloat(
-        initialValue = -0.3f, targetValue = 1.3f,
-        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing)),
-        label = "shimmer"
-    )
-    val glowPulse by infiniteTransition.animateFloat(
-        initialValue = 0.3f, targetValue = 0.8f,
-        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
-        label = "glowPulse"
-    )
+    LaunchedEffect(Unit) {
+        delay(50)
+        launch { wrapAlpha.animateTo(1f, tween(400)) }
+        launch {
+            wrapScale.animateTo(1.06f, tween(390, easing = popEasing))
+            wrapScale.animateTo(1f, tween(260, easing = EaseOutCubic))
+        }
+        launch { cardP.animateTo(1f, tween(550, easing = pieceEasing)) }
+        val bgDelays = longArrayOf(90, 118, 146, 174, 202, 230, 258, 286, 314, 342)
+        bgP.forEachIndexed { i, a -> launch { delay(bgDelays[i]); a.animateTo(1f, tween(550, easing = pieceEasing)) } }
+        val mainDelays = longArrayOf(420, 470, 520, 570)
+        mainP.forEachIndexed { i, a -> launch { delay(mainDelays[i]); a.animateTo(1f, tween(600, easing = bounceEasing)) } }
+        launch { delay(660); padP.animateTo(1f, tween(550, easing = pieceEasing)) }
+        launch { delay(780); cursorP.animateTo(1f, tween(600, easing = bounceEasing)) }
+        letters.forEachIndexed { i, _ ->
+            launch {
+                delay(550L + i * 70L)
+                launch { lAlpha[i].animateTo(1f, tween(80)) }
+                launch {
+                    lScale[i].animateTo(0.92f, tween(176, easing = stampEasing))
+                    lScale[i].animateTo(1.04f, tween(74, easing = EaseOutCubic))
+                    lScale[i].animateTo(1f, tween(70, easing = EaseOutCubic))
+                }
+                launch {
+                    lY[i].animateTo(2f, tween(176, easing = stampEasing))
+                    lY[i].animateTo(-1f, tween(74, easing = EaseOutCubic))
+                    lY[i].animateTo(0f, tween(70, easing = EaseOutCubic))
+                }
+            }
+        }
+    }
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFF1A1B4B)),
+        modifier = modifier.fillMaxSize().background(Color(0xFFe6e0d6)),
         contentAlignment = Alignment.Center
     ) {
-        // Ambient glow circles
         Canvas(modifier = Modifier.fillMaxSize()) {
+            val spacing = 26.dp.toPx()
+            val dotR = 1.dp.toPx()
             val cx = size.width / 2f
-            val cy = size.height / 2f
-            drawCircle(
-                brush = Brush.radialGradient(
-                    listOf(Color(0xFF4B4FCF).copy(alpha = glowPulse * 0.15f), Color.Transparent),
-                    center = Offset(cx, cy - 40f),
-                    radius = size.minDimension * 0.6f
-                ),
-                radius = size.minDimension * 0.6f,
-                center = Offset(cx, cy - 40f)
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    listOf(Color(0xFF0D9488).copy(alpha = glowPulse * 0.08f), Color.Transparent),
-                    center = Offset(cx + 80f, cy + 60f),
-                    radius = size.minDimension * 0.4f
-                ),
-                radius = size.minDimension * 0.4f,
-                center = Offset(cx + 80f, cy + 60f)
-            )
+            val cy = size.height * 0.45f
+            val maxDist = size.minDimension * 0.34f
+            val cols = (size.width / spacing).toInt() + 2
+            val rows = (size.height / spacing).toInt() + 2
+            for (col in -1..cols) {
+                for (row in -1..rows) {
+                    val px = col * spacing
+                    val py = row * spacing
+                    val dist = sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy))
+                    if (dist < maxDist) {
+                        val a = (1f - dist / maxDist)
+                        drawCircle(Color.Black.copy(alpha = a * a * 0.05f), dotR, Offset(px, py))
+                    }
+                }
+            }
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // Animated trackpad + cursor icon
-            Canvas(modifier = Modifier.size(140.dp)) {
-                val w = size.width
-                val h = size.height
-                val prog = trackpadProgress.value
-                val cProg = cursorProgress.value
+            Canvas(
+                modifier = Modifier
+                    .size(280.dp)
+                    .graphicsLayer {
+                        scaleX = wrapScale.value
+                        scaleY = wrapScale.value
+                        alpha = wrapAlpha.value
+                    }
+            ) {
+                val s = size.width / 680f
+                val nc = drawContext.canvas.nativeCanvas
 
-                // Trackpad body outline — draws on progressively
-                val trackpadPath = Path().apply {
-                    val l = w * 0.18f; val t = h * 0.1f
-                    val r = w * 0.82f; val b = h * 0.78f
-                    val cr = w * 0.08f
-                    moveTo(l + cr, t)
-                    lineTo(r - cr, t)
-                    cubicTo(r, t, r, t, r, t + cr)
-                    lineTo(r, b - cr)
-                    cubicTo(r, b, r, b, r - cr, b)
-                    lineTo(l + cr, b)
-                    cubicTo(l, b, l, b, l, b - cr)
-                    lineTo(l, t + cr)
-                    cubicTo(l, t, l, t, l + cr, t)
-                    close()
-                }
-                val pathMeasure = PathMeasure()
-                pathMeasure.setPath(trackpadPath, true)
-                val totalLength = pathMeasure.length
-                val drawnPath = Path()
-                pathMeasure.getSegment(0f, totalLength * prog, drawnPath)
-
-                // Glow behind trackpad
-                if (glowAlpha.value > 0f) {
-                    drawRoundRect(
-                        brush = Brush.radialGradient(
-                            listOf(
-                                Color(0xFF7B7FD4).copy(alpha = glowAlpha.value * 0.3f),
-                                Color.Transparent
-                            ),
-                            center = Offset(w / 2f, h * 0.44f),
-                            radius = w * 0.5f
-                        ),
-                        topLeft = Offset(w * 0.08f, h * 0.02f),
-                        size = Size(w * 0.84f, h * 0.84f),
-                        cornerRadius = CornerRadius(w * 0.08f)
-                    )
-                }
-
-                // Trackpad outline
-                drawPath(
-                    drawnPath,
-                    color = Color.White,
-                    style = Stroke(width = 3f, cap = StrokeCap.Round)
-                )
-
-                // Fill when fully drawn
-                if (prog > 0.95f) {
-                    val fillAlpha = ((prog - 0.95f) / 0.05f).coerceIn(0f, 1f) * 0.08f
-                    drawPath(trackpadPath, color = Color.White.copy(alpha = fillAlpha))
-                }
-
-                // Inner trackpad surface
-                if (prog > 0.5f) {
-                    val innerAlpha = ((prog - 0.5f) / 0.5f).coerceIn(0f, 1f) * 0.12f
-                    drawRoundRect(
-                        color = Color(0xFF7B7FD4).copy(alpha = innerAlpha),
-                        topLeft = Offset(w * 0.22f, h * 0.16f),
-                        size = Size(w * 0.56f, h * 0.52f),
-                        cornerRadius = CornerRadius(w * 0.04f)
-                    )
-                }
-
-                // Divider line
-                if (prog > 0.7f) {
-                    val divAlpha = ((prog - 0.7f) / 0.3f).coerceIn(0f, 1f)
-                    drawLine(
-                        color = Color.White.copy(alpha = 0.3f * divAlpha),
-                        start = Offset(w * 0.25f, h * 0.66f),
-                        end = Offset(w * 0.75f, h * 0.66f),
-                        strokeWidth = 1.5f
-                    )
-                }
-
-                // Cursor arrow — scales in with bounce
-                if (cProg > 0f) {
-                    val cx = w * 0.52f
-                    val cy = h * 0.28f
-                    val cursorScale = cProg
-                    translate(
-                        left = cx - cx * cursorScale + cx,
-                        top = cy - cy * cursorScale + cy
-                    ) {
-                        val arrowPath = Path().apply {
-                            moveTo(cx - w * 0.02f, cy)
-                            lineTo(cx - w * 0.02f, cy + h * 0.22f)
-                            lineTo(cx + w * 0.04f, cy + h * 0.16f)
-                            lineTo(cx + w * 0.09f, cy + h * 0.26f)
-                            lineTo(cx + w * 0.13f, cy + h * 0.24f)
-                            lineTo(cx + w * 0.08f, cy + h * 0.14f)
-                            lineTo(cx + w * 0.14f, cy + h * 0.12f)
-                            close()
-                        }
-                        drawPath(arrowPath, color = Color(0xFF2DD4BF).copy(alpha = cProg))
+                val cp = cardP.value
+                if (cp > 0f) {
+                    val cs = 0.94f + 0.06f * cp
+                    scale(cs, pivot = Offset(340f * s, 340f * s)) {
+                        drawRoundRect(Color(0xFFe6e0d6).copy(alpha = cp), Offset(90f * s, 90f * s), Size(500f * s, 500f * s), CornerRadius(48f * s))
                     }
                 }
 
-                // Sparkle particles
-                if (particleProgress.value > 0f) {
-                    val pProg = particleProgress.value
-                    val sparkles = listOf(
-                        Offset(w * 0.15f, h * 0.2f), Offset(w * 0.85f, h * 0.15f),
-                        Offset(w * 0.9f, h * 0.6f), Offset(w * 0.1f, h * 0.7f),
-                        Offset(w * 0.75f, h * 0.85f), Offset(w * 0.25f, h * 0.88f)
-                    )
-                    sparkles.forEachIndexed { i, pos ->
-                        val delay = i * 0.12f
-                        val localProg = ((pProg - delay) / (1f - delay)).coerceIn(0f, 1f)
-                        if (localProg > 0f) {
-                            val sparkAlpha = if (localProg < 0.5f) localProg * 2f else (1f - localProg) * 2f
-                            val sparkSize = 2f + localProg * 3f
-                            drawCircle(
-                                color = Color(0xFF7B7FD4).copy(alpha = sparkAlpha * 0.8f),
-                                radius = sparkSize,
-                                center = pos
-                            )
+                val bgOp = floatArrayOf(0.28f, 0.22f, 0.18f, 0.20f, 0.16f, 0.16f, 0.14f, 0.12f, 0.13f, 0.10f)
+                val bgRot = floatArrayOf(-22f, 18f, 30f, -30f, 8f, -14f, 12f, 15f, -26f, 20f)
+                val bgPivX = floatArrayOf(144f, 500f, 535f, 134f, 308f, 218f, 441f, 124f, 537f, 330f)
+                val bgPivY = floatArrayOf(140f, 150f, 359f, 419f, 117f, 527f, 537f, 227f, 467f, 551f)
+                val bgSx = floatArrayOf(108f, 460f, 500f, 95f, 280f, 190f, 410f, 95f, 510f, 305f)
+                val bgSy = floatArrayOf(124f, 134f, 344f, 404f, 104f, 514f, 524f, 214f, 454f, 539f)
+                val bgTx = floatArrayOf(108f, 460f, 500f, 95f, 280f, 190f, 410f, 95f, 510f, 305f)
+                val bgTy = floatArrayOf(120f, 130f, 340f, 400f, 100f, 510f, 520f, 210f, 450f, 535f)
+                val bgW = floatArrayOf(72f, 80f, 70f, 78f, 56f, 56f, 62f, 58f, 55f, 50f)
+                val bgH = floatArrayOf(40f, 40f, 38f, 38f, 34f, 34f, 34f, 34f, 34f, 32f)
+                val bgRx = floatArrayOf(10f, 10f, 10f, 10f, 9f, 9f, 9f, 9f, 9f, 9f)
+                val bgLabels = arrayOf("Esc", "Tab", "Fn", "Del", "W", "A", "End", "Q", "Z", "S")
+                val bgLx = floatArrayOf(144f, 500f, 535f, 134f, 308f, 218f, 441f, 124f, 537f, 330f)
+                val bgLy = floatArrayOf(145f, 155f, 364f, 424f, 122f, 532f, 542f, 232f, 472f, 556f)
+                val bgFs = floatArrayOf(12f, 12f, 11f, 11f, 11f, 11f, 11f, 11f, 11f, 11f)
+
+                for (i in 0 until 10) {
+                    val p = bgP[i].value
+                    if (p > 0f) {
+                        val ps = 0.5f + 0.5f * p
+                        val tY = 6f * (1f - p) * s
+                        val cX = (bgTx[i] + bgW[i] / 2f) * s
+                        val cY = (bgTy[i] + bgH[i] / 2f) * s
+                        translate(top = tY) {
+                            scale(ps, pivot = Offset(cX, cY)) {
+                                rotate(bgRot[i], pivot = Offset(bgPivX[i] * s, bgPivY[i] * s)) {
+                                    val alpha = p * bgOp[i]
+                                    drawRoundRect(Color(0xFFc4bfb5).copy(alpha = alpha), Offset(bgSx[i] * s, bgSy[i] * s), Size(bgW[i] * s, bgH[i] * s), CornerRadius(bgRx[i] * s))
+                                    drawRoundRect(Color(0xFFdad5cb).copy(alpha = alpha), Offset(bgTx[i] * s, bgTy[i] * s), Size(bgW[i] * s, bgH[i] * s), CornerRadius(bgRx[i] * s))
+                                    bgLabelPaint.textSize = bgFs[i] * s
+                                    bgLabelPaint.color = android.graphics.Color.argb((alpha * 255).toInt(), 0x9a, 0x94, 0x88)
+                                    nc.drawText(bgLabels[i], bgLx[i] * s, bgLy[i] * s, bgLabelPaint)
+                                }
+                            }
                         }
                     }
                 }
 
-                // Shimmer line across trackpad
-                if (prog > 0.9f) {
-                    val shimmerX = w * shimmer
-                    drawLine(
-                        brush = Brush.horizontalGradient(
-                            listOf(Color.Transparent, Color.White.copy(alpha = 0.15f), Color.Transparent),
-                            startX = shimmerX - w * 0.15f,
-                            endX = shimmerX + w * 0.15f
-                        ),
-                        start = Offset(shimmerX, h * 0.12f),
-                        end = Offset(shimmerX, h * 0.76f),
-                        strokeWidth = w * 0.06f
-                    )
+                val mRot = floatArrayOf(-7f, 10f, 6f, -9f)
+                val mPivX = floatArrayOf(200f, 475f, 200f, 475f)
+                val mPivY = floatArrayOf(195f, 188f, 480f, 475f)
+                val mSx = floatArrayOf(140f, 415f, 140f, 415f)
+                val mSy = floatArrayOf(174f, 166f, 458f, 453f)
+                val mTx = floatArrayOf(140f, 415f, 140f, 415f)
+                val mTy = floatArrayOf(168f, 160f, 452f, 447f)
+                val mW = 120f; val mH = 56f; val mRx2 = 14f
+                val mIx = floatArrayOf(144f, 419f, 144f, 419f)
+                val mIy = floatArrayOf(171f, 163f, 455f, 450f)
+                val mIw = 112f; val mIh = 46f; val mIr = 11f
+                val mLabels = arrayOf("Shift", "Enter", "Ctrl", "Alt")
+                val mLx = floatArrayOf(200f, 475f, 200f, 475f)
+                val mLy = floatArrayOf(202f, 194f, 486f, 481f)
+
+                for (i in 0 until 4) {
+                    val p = mainP[i].value
+                    if (p > 0f) {
+                        val ps = 0.3f + 0.7f * p
+                        val tY = 14f * (1f - p) * s
+                        val cX = (mTx[i] + mW / 2f) * s
+                        val cY = (mTy[i] + mH / 2f) * s
+                        translate(top = tY) {
+                            scale(ps, pivot = Offset(cX, cY)) {
+                                rotate(mRot[i], pivot = Offset(mPivX[i] * s, mPivY[i] * s)) {
+                                    drawRoundRect(Color(0xFFb5afa3).copy(alpha = p), Offset(mSx[i] * s, mSy[i] * s), Size(mW * s, mH * s), CornerRadius(mRx2 * s))
+                                    drawRoundRect(Color(0xFFd6d0c6).copy(alpha = p), Offset(mTx[i] * s, mTy[i] * s), Size(mW * s, mH * s), CornerRadius(mRx2 * s))
+                                    drawRoundRect(Color(0xFFe8e3db).copy(alpha = p * 0.5f), Offset(mIx[i] * s, mIy[i] * s), Size(mIw * s, mIh * s), CornerRadius(mIr * s), style = Stroke(0.8f * s))
+                                    mainLabelPaint.textSize = 17f * s
+                                    mainLabelPaint.color = android.graphics.Color.argb((p * 255).toInt(), 0x5e, 0x59, 0x53)
+                                    nc.drawText(mLabels[i], mLx[i] * s, mLy[i] * s, mainLabelPaint)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val pp = padP.value
+                if (pp > 0f) {
+                    val ps = 0.85f + 0.15f * pp
+                    val padCx = 340f * s; val padCy = 342.5f * s
+                    scale(ps, pivot = Offset(padCx, padCy)) {
+                        drawRoundRect(Color(0xFFb5afa3).copy(alpha = pp), Offset(195f * s, 261f * s), Size(290f * s, 175f * s), CornerRadius(22f * s))
+                        drawRoundRect(Color(0xFFcdc7bd).copy(alpha = pp), Offset(195f * s, 255f * s), Size(290f * s, 175f * s), CornerRadius(22f * s))
+                        drawRoundRect(Color(0xFFccc6bb).copy(alpha = pp * 0.55f), Offset(208f * s, 267f * s), Size(264f * s, 150f * s), CornerRadius(15f * s))
+                        drawRoundRect(Color(0xFFb0a99d).copy(alpha = pp * 0.55f), Offset(208f * s, 267f * s), Size(264f * s, 150f * s), CornerRadius(15f * s), style = Stroke(0.8f * s))
+                        drawLine(Color(0xFFa9a296).copy(alpha = pp), Offset(235f * s, 398f * s), Offset(445f * s, 398f * s), 2f * s, StrokeCap.Round)
+                    }
+                }
+
+                val crp = cursorP.value
+                if (crp > 0f) {
+                    val crY = -10f * (1f - crp) * s
+                    translate(top = crY) {
+                        scale(crp, pivot = Offset(315f * s, 335f * s)) {
+                            translate(left = 315f * s, top = 335f * s) {
+                                val cursorPath = Path().apply {
+                                    moveTo(-24f * s, -45f * s)
+                                    lineTo(-24f * s, 30f * s)
+                                    lineTo(-8f * s, 14f * s)
+                                    lineTo(10f * s, 45f * s)
+                                    lineTo(26f * s, 36f * s)
+                                    lineTo(8f * s, 6f * s)
+                                    lineTo(28f * s, -2f * s)
+                                    close()
+                                }
+                                drawPath(cursorPath, Color(0xFF484340).copy(alpha = crp))
+                            }
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // App name with slide-up
+            Row {
+                letters.forEachIndexed { i, ch ->
+                    Text(
+                        text = ch.toString(),
+                        color = Color(0xFF3a352f),
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily(Font(R.font.caveat_bold)),
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = lScale[i].value
+                            scaleY = lScale[i].value
+                            translationY = lY[i].value * 2f
+                            alpha = lAlpha[i].value
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
+    val morphEasing = remember { CubicBezierEasing(0.4f, 0f, 0.12f, 1f) }
+    val stampEasing = remember { CubicBezierEasing(0.22f, 0.68f, 0.36f, 1.22f) }
+
+    var mode by remember { mutableStateOf(0) }
+    var cyclesDone by remember { mutableStateOf(0) }
+    val modeDurs = remember { longArrayOf(4000, 4500, 4500) }
+
+    LaunchedEffect(mode) {
+        val first = mode == 0 && cyclesDone == 0
+        delay(if (first) 1800L else modeDurs[mode])
+        val next = (mode + 1) % 3
+        if (next == 0) cyclesDone++
+        mode = next
+    }
+
+    val surfBot by animateFloatAsState(when (mode) { 0 -> 0.022f; 1 -> 0.6f; else -> 0.38f }, tween(850, easing = morphEasing))
+    val surfAlpha by animateFloatAsState(when (mode) { 1 -> 0f; else -> 1f }, tween(850, easing = morphEasing))
+    val keysAlpha by animateFloatAsState(when (mode) { 0 -> 0f; else -> 1f }, tween(850, easing = morphEasing))
+    val keysOffY by animateFloatAsState(when (mode) { 0 -> 20f; else -> 0f }, tween(850, easing = morphEasing))
+    val keysTopFrac by animateFloatAsState(when (mode) { 2 -> 0.67f; else -> 1f }, tween(850, easing = morphEasing))
+    val laptopAlpha by animateFloatAsState(when (mode) { 1 -> 1f; else -> 0f }, tween(700, easing = morphEasing))
+    val divAlpha by animateFloatAsState(when (mode) { 2 -> 1f; else -> 0f }, tween(700, easing = morphEasing))
+    val curAlpha by animateFloatAsState(when (mode) { 1 -> 0f; else -> 1f }, tween(500))
+
+    var curX by remember { mutableStateOf(0.45f) }
+    var curY by remember { mutableStateOf(0.35f) }
+    var showRipple by remember { mutableStateOf(false) }
+    var ripX by remember { mutableStateOf(0f) }
+    var ripY by remember { mutableStateOf(0f) }
+    val ripScale = remember { Animatable(0f) }
+    val ripAlpha = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        val wps = floatArrayOf(0.45f,0.35f,0f, 0.72f,0.2f,700f, 0.6f,0.55f,1500f, 0.25f,0.4f,2100f, 0.55f,0.65f,2700f, 0.45f,0.35f,3400f)
+        val n = wps.size / 3
+        var start = 0L
+        while (true) {
+            withInfiniteAnimationFrameMillis { ms ->
+                if (start == 0L) start = ms
+                when (mode) {
+                    0 -> {
+                        val el = (ms - start) % 4000
+                        var si = 0
+                        for (i in 0 until n - 1) { if (el >= wps[i*3+2].toLong() && el < wps[(i+1)*3+2].toLong()) { si = i; break } }
+                        if (el >= wps[(n-1)*3+2].toLong()) si = n - 2
+                        val ax = wps[si*3]; val ay = wps[si*3+1]; val at = wps[si*3+2]
+                        val bx = wps[(si+1)*3]; val by = wps[(si+1)*3+1]; val bt = wps[(si+1)*3+2]
+                        val p = ((el - at.toLong()).toFloat() / (bt - at)).coerceIn(0f, 1f)
+                        val e = if (p < 0.5f) 2*p*p else 1 - (-2*p+2).pow(2)/2
+                        curX = ax + (bx - ax) * e; curY = ay + (by - ay) * e
+                        if (el in 2700..2740 && !showRipple) {
+                            showRipple = true; ripX = curX; ripY = curY
+                            launch {
+                                ripScale.snapTo(0f); ripAlpha.snapTo(0.5f)
+                                launch { ripScale.animateTo(1f, tween(500)) }
+                                launch { ripAlpha.animateTo(0f, tween(500)) }
+                                delay(500); showRipple = false
+                            }
+                        }
+                        if (el < 2700) showRipple = false
+                    }
+                    2 -> {
+                        val t = ms * 0.001f
+                        curX = 0.5f + sin(t * 0.7f) * 0.28f
+                        curY = 0.18f + cos(t * 0.5f) * 0.12f
+                    }
+                }
+            }
+        }
+    }
+
+    var typedText by remember { mutableStateOf("") }
+    var litKey by remember { mutableStateOf("") }
+    LaunchedEffect(mode) {
+        if (mode == 1) {
+            val word = "mouskey"
+            while (true) {
+                typedText = ""; litKey = ""
+                for (ch in word) { litKey = ch.uppercase(); typedText += ch; delay(280) }
+                litKey = ""; delay(280 * 6)
+            }
+        } else { typedText = ""; litKey = "" }
+    }
+
+    var flashKey by remember { mutableStateOf("") }
+    LaunchedEffect(mode) {
+        if (mode == 2) {
+            val chars = "QWERTYUIOPASDFGHJKLZXCVBNM"
+            while (true) {
+                delay(80)
+                if (kotlin.random.Random.nextFloat() < 0.1f) {
+                    flashKey = chars[kotlin.random.Random.nextInt(chars.length)].toString()
+                    delay(200); flashKey = ""
+                }
+            }
+        } else { flashKey = "" }
+    }
+
+    val progFrac = remember { Animatable(0f) }
+    LaunchedEffect(mode) {
+        progFrac.snapTo(0f)
+        progFrac.animateTo(1f, tween(modeDurs[mode].toInt(), easing = LinearEasing))
+    }
+
+    val modeLabel by remember(mode) { mutableStateOf(arrayOf("Trackpad", "Keyboard", "Split Mode")[mode]) }
+    val labelAlpha = remember { Animatable(0f) }
+    LaunchedEffect(mode) {
+        labelAlpha.snapTo(0f)
+        labelAlpha.animateTo(1f, tween(300))
+    }
+
+    val letters = "Mouskey"
+    val lScale = remember { letters.map { Animatable(1.6f) } }
+    val lAlpha = remember { letters.map { Animatable(0f) } }
+    val lY = remember { letters.map { Animatable(-12f) } }
+    LaunchedEffect(Unit) {
+        letters.forEachIndexed { i, _ ->
+            launch {
+                delay(150L + i * 70L)
+                launch { lAlpha[i].animateTo(1f, tween(80)) }
+                launch {
+                    lScale[i].animateTo(0.93f, tween(187, easing = stampEasing))
+                    lScale[i].animateTo(1.03f, tween(75))
+                    lScale[i].animateTo(1f, tween(75))
+                }
+                launch {
+                    lY[i].animateTo(1f, tween(187, easing = stampEasing))
+                    lY[i].animateTo(-1f, tween(75))
+                    lY[i].animateTo(0f, tween(75))
+                }
+            }
+        }
+    }
+
+    val headerAlpha = remember { Animatable(0f) }
+    val headerY = remember { Animatable(10f) }
+    val phoneAlpha = remember { Animatable(0f) }
+    val phoneY = remember { Animatable(10f) }
+    val progBarAlpha = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        launch { delay(100); launch { headerAlpha.animateTo(1f, tween(600)) }; launch { headerY.animateTo(0f, tween(600, easing = CubicBezierEasing(0.2f, 1f, 0.3f, 1f))) } }
+        launch { delay(500); launch { phoneAlpha.animateTo(1f, tween(700)) }; launch { phoneY.animateTo(0f, tween(700, easing = CubicBezierEasing(0.2f, 1f, 0.3f, 1f))) } }
+        launch { delay(1200); progBarAlpha.animateTo(1f, tween(400)) }
+    }
+
+    val bg = Color(0xFFece6dc); val ink = Color(0xFF2e2a24); val mute = Color(0xFF7d756a)
+    val accent = Color(0xFF6b5e4f); val surface = Color(0xFFcac3b8); val surfHi = Color(0xFFd4cec4)
+    val keyFace = Color(0xFFe8e3da); val keySide = Color(0xFFc4bdb2); val active = Color(0xFF7a6e5f)
+
+    data class KD(val label: String, val l: String = "", val flex: Float = 1f, val sup: String = "")
+
+    val fnRow = remember { listOf(KD("Esc","",1.3f), KD("*"), KD("*"), KD("◂"), KD("◂◂"), KD("▸▸"), KD("▸|"), KD("||"), KD("▸▸|")) }
+    val qRow = remember { "qwertyuiop".mapIndexed { i, c -> KD(c.toString(), c.uppercase(), sup = if (i == 9) "0" else "${i+1}") } }
+    val aRow = remember { "asdfghjkl".map { KD(it.toString(), it.uppercase()) } }
+    val zRow = remember { listOf(KD("⇧","",1.3f)) + "zxcvbnm".map { KD(it.toString(), it.uppercase()) } + listOf(KD("⌫","",1.3f)) }
+    val modRow = remember { listOf(KD("Fn","",1.3f), KD("Ctrl","",1.3f), KD("Alt","",1.3f), KD(""," ",3.5f), KD("."), KD("Enter","",1.3f)) }
+    val allRows = remember { listOf(fnRow, qRow, aRow, zRow, modRow) }
+
+    Box(
+        modifier = modifier.fillMaxSize().background(bg)
+            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onFinish() }
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val spacing = 28.dp.toPx(); val dotR = 0.6.dp.toPx()
+            val cx = size.width / 2f; val cy = size.height * 0.4f
+            val rx = size.width * 0.4f; val ry = size.height * 0.3f
+            for (col in -1..(size.width / spacing).toInt() + 1) {
+                for (row in -1..(size.height / spacing).toInt() + 1) {
+                    val px = col * spacing; val py = row * spacing
+                    val dx = (px - cx) / rx; val dy = (py - cy) / ry
+                    val d = sqrt(dx * dx + dy * dy)
+                    if (d < 1f) drawCircle(mute.copy(alpha = (1f - d) * 0.08f), dotR, Offset(px, py))
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier.fillMaxSize().padding(top = 40.dp, start = 20.dp, end = 20.dp, bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.graphicsLayer { alpha = headerAlpha.value; translationY = headerY.value * 3f }
+            ) {
+                Row {
+                    letters.forEachIndexed { i, ch ->
+                        Text(
+                            ch.toString(), color = ink, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily(Font(R.font.caveat_bold)), letterSpacing = 1.sp,
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = lScale[i].value; scaleY = lScale[i].value
+                                translationY = lY[i].value * 2f; alpha = lAlpha[i].value
+                            }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    modeLabel, color = mute, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.5.sp,
+                    modifier = Modifier.graphicsLayer { alpha = labelAlpha.value }
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Box(
+                modifier = Modifier.weight(1f).graphicsLayer { alpha = phoneAlpha.value; translationY = phoneY.value * 3f },
+                contentAlignment = Alignment.Center
+            ) {
+                val phoneW = 290.dp; val phoneH = 536.dp
+                val si = 11.dp
+                val scrR = 27.dp
+                val surfR = 16.dp
+
+                Box(
+                    modifier = Modifier.size(phoneW, phoneH)
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                colors = listOf(surfHi, surface)
+                            ),
+                            shape = RoundedCornerShape(38.dp)
+                        )
+                        .border(1.dp, Color(0x14808080), RoundedCornerShape(38.dp))
+                ) {
+                    Box(
+                        modifier = Modifier.padding(si)
+                            .fillMaxSize()
+                            .background(
+                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    listOf(surface, Color(0xFFb6b0a6))
+                                ),
+                                shape = RoundedCornerShape(scrR)
+                            )
+                            .border(1.dp, Color(0x10000000), RoundedCornerShape(scrR))
+                            .clip(RoundedCornerShape(scrR))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(start = si, end = si, top = si)
+                                .fillMaxWidth()
+                                .fillMaxHeight(1f - surfBot)
+                                .graphicsLayer { alpha = surfAlpha }
+                                .background(
+                                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(surfHi, surface)),
+                                    shape = RoundedCornerShape(surfR)
+                                )
+                                .border(1.dp, Color(0x18808080), RoundedCornerShape(surfR))
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.35f)
+                                    .background(
+                                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                            listOf(Color.White.copy(alpha = 0.12f), Color.Transparent)
+                                        ),
+                                        shape = RoundedCornerShape(topStart = surfR, topEnd = surfR)
+                                    )
+                            )
+                            if (mode == 0) {
+                                Box(
+                                    modifier = Modifier.align(Alignment.BottomCenter)
+                                        .padding(bottom = 11.dp)
+                                        .fillMaxWidth(0.3f).height(1.5.dp)
+                                        .background(Color(0x1F808080), RoundedCornerShape(1.dp))
+                                )
+                            }
+                        }
+
+                        if (divAlpha > 0f) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth(0.44f)
+                                    .height(3.dp)
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = (phoneH - si * 2) * 0.64f)
+                                    .graphicsLayer { alpha = divAlpha; scaleX = divAlpha }
+                                    .background(Color(0x20808080), RoundedCornerShape(2.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier.width(16.dp).height(3.dp)
+                                        .background(Color(0x33808080), RoundedCornerShape(2.dp))
+                                )
+                            }
+                        }
+
+                        if (laptopAlpha > 0f) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(start = 22.dp, end = 22.dp, top = si, bottom = 179.dp)
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        alpha = laptopAlpha
+                                        translationY = (1f - laptopAlpha) * 36f
+                                        scaleX = 0.92f + 0.08f * laptopAlpha
+                                        scaleY = 0.92f + 0.08f * laptopAlpha
+                                    },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(0.88f)
+                                        .aspectRatio(16f / 10f)
+                                        .background(ink, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                                        .padding(8.dp)
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Box(Modifier.size(4.dp).background(Color(0x4DFF5F57), CircleShape))
+                                        Box(Modifier.size(4.dp).background(Color(0x4DFEBC2E), CircleShape))
+                                        Box(Modifier.size(4.dp).background(Color(0x4D28C840), CircleShape))
+                                    }
+                                    Spacer(Modifier.height(5.dp))
+                                    Text(
+                                        typedText + "█", color = bg.copy(alpha = 0.85f),
+                                        fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().height(5.dp)
+                                        .background(
+                                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                listOf(Color(0xFFABA49A), surface)
+                                            ),
+                                            shape = RoundedCornerShape(bottomStart = 4.dp, bottomEnd = 4.dp)
+                                        )
+                                ) {
+                                    Box(
+                                        modifier = Modifier.align(Alignment.TopCenter)
+                                            .fillMaxWidth(0.4f).height(1.5.dp)
+                                            .background(Color(0x26808080), RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp))
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "TYPE ON PHONE, SEE IT HERE", color = mute,
+                                    fontSize = 7.5.sp, fontWeight = FontWeight.Medium,
+                                    letterSpacing = 0.8.sp
+                                )
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                                .padding(start = si, end = si, bottom = si)
+                                .fillMaxWidth()
+                                .then(
+                                    if (keysTopFrac < 1f) Modifier.fillMaxHeight(1f - keysTopFrac)
+                                    else Modifier.height(156.dp)
+                                )
+                                .graphicsLayer {
+                                    alpha = keysAlpha
+                                    translationY = keysOffY * 3f
+                                    scaleX = if (mode == 0) 0.9f + 0.1f * keysAlpha else 1f
+                                    scaleY = if (mode == 0) 0.9f + 0.1f * keysAlpha else 1f
+                                },
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            allRows.forEachIndexed { rowIdx, row ->
+                                Row(
+                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    row.forEach { key ->
+                                        val isLit = (key.l.isNotEmpty() && (key.l == litKey || key.l == flashKey))
+                                        Box(modifier = Modifier.weight(key.flex).fillMaxHeight()) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize()
+                                                    .offset(y = 1.dp)
+                                                    .background(if (isLit) active else keySide, RoundedCornerShape(3.dp))
+                                            )
+                                            Box(
+                                                modifier = Modifier.fillMaxSize()
+                                                    .padding(bottom = 2.dp)
+                                                    .background(if (isLit) active else keyFace, RoundedCornerShape(3.dp)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    key.label, color = if (isLit) bg else mute,
+                                                    fontSize = if (rowIdx == 0 || key.flex > 1.1f) 5.5.sp else 7.sp,
+                                                    fontWeight = if (rowIdx == 0 || key.flex > 1.1f) FontWeight.Medium else FontWeight.SemiBold,
+                                                    letterSpacing = (-0.01).sp, maxLines = 1
+                                                )
+                                                if (key.sup.isNotEmpty()) {
+                                                    Text(
+                                                        key.sup, color = mute.copy(alpha = 0.45f),
+                                                        fontSize = 3.5.sp, fontWeight = FontWeight.Normal,
+                                                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 1.dp, end = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (curAlpha > 0f) {
+                            Canvas(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = curAlpha }) {
+                                val sx = size.width; val sy = size.height
+                                val cx2 = curX * sx; val cy2 = curY * sy
+                                val cursorPath = Path().apply {
+                                    moveTo(cx2 + 3f, cy2 + 1f)
+                                    lineTo(cx2 + 3f, cy2 + 14f)
+                                    lineTo(cx2 + 6.5f, cy2 + 10.8f)
+                                    lineTo(cx2 + 10f, cy2 + 17f)
+                                    lineTo(cx2 + 13f, cy2 + 15f)
+                                    lineTo(cx2 + 9.2f, cy2 + 8.5f)
+                                    lineTo(cx2 + 14f, cy2 + 7.5f)
+                                    close()
+                                }
+                                drawPath(cursorPath, ink.copy(alpha = 0.85f))
+                            }
+                        }
+
+                        if (showRipple && curAlpha > 0f) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val sx = size.width; val sy = size.height
+                                val rx2 = ripX * sx; val ry2 = ripY * sy
+                                val r = 10.dp.toPx() * ripScale.value
+                                drawCircle(
+                                    color = accent.copy(alpha = ripAlpha.value * 0.2f),
+                                    radius = r, center = Offset(rx2, ry2),
+                                    style = Stroke(1.dp.toPx())
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.graphicsLayer { alpha = progBarAlpha.value }
+            ) {
+                for (i in 0 until 3) {
+                    Box(modifier = Modifier.width(30.dp).height(3.dp).background(Color(0x1F808080), RoundedCornerShape(2.dp))) {
+                        if (i == mode) {
+                            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(progFrac.value).background(accent, RoundedCornerShape(2.dp)))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ConnectScreen(onSetupLater: () -> Unit, modifier: Modifier = Modifier) {
+    val bg = Color(0xFFece6dc)
+    val ink = Color(0xFF2e2a24)
+    val mute = Color(0xFF7d756a)
+    val accent = Color(0xFF6b5e4f)
+    val card = Color(0xFFf2ede6)
+    val stepBg = Color(0x0B6B5E4F)
+    val winBg = Color(0xFFf5f1eb)
+    val winBorder = Color(0x1A6B5E4F)
+    val winHover = Color(0x0D6B5E4F)
+
+    val brandAlpha = remember { Animatable(0f) }
+    val brandY = remember { Animatable(10f) }
+    val headAlpha = remember { Animatable(0f) }
+    val headY = remember { Animatable(10f) }
+    val subAlpha = remember { Animatable(0f) }
+    val subY = remember { Animatable(10f) }
+    val devAlpha = remember { Animatable(0f) }
+    val devY = remember { Animatable(10f) }
+    val panelAlpha = remember { Animatable(0f) }
+    val panelY = remember { Animatable(10f) }
+    val step1Alpha = remember { Animatable(0f) }
+    val step1Y = remember { Animatable(6f) }
+    val step2Alpha = remember { Animatable(0f) }
+    val step2Y = remember { Animatable(6f) }
+    val step3Alpha = remember { Animatable(0f) }
+    val step3Y = remember { Animatable(6f) }
+    val skipAlpha = remember { Animatable(0f) }
+    val skipY = remember { Animatable(10f) }
+
+    val easeOut = CubicBezierEasing(0.2f, 1f, 0.3f, 1f)
+
+    LaunchedEffect(Unit) {
+        launch { delay(150); launch { brandAlpha.animateTo(1f, tween(600, easing = easeOut)) }; launch { brandY.animateTo(0f, tween(600, easing = easeOut)) } }
+        launch { delay(350); launch { headAlpha.animateTo(1f, tween(600, easing = easeOut)) }; launch { headY.animateTo(0f, tween(600, easing = easeOut)) } }
+        launch { delay(550); launch { subAlpha.animateTo(1f, tween(500)) }; launch { subY.animateTo(0f, tween(500)) } }
+        launch { delay(600); launch { devAlpha.animateTo(1f, tween(700, easing = easeOut)) }; launch { devY.animateTo(0f, tween(700, easing = easeOut)) } }
+        launch { delay(850); launch { panelAlpha.animateTo(1f, tween(600, easing = easeOut)) }; launch { panelY.animateTo(0f, tween(600, easing = easeOut)) } }
+        launch { delay(1200); launch { step1Alpha.animateTo(1f, tween(400, easing = easeOut)) }; launch { step1Y.animateTo(0f, tween(400, easing = easeOut)) } }
+        launch { delay(1450); launch { step2Alpha.animateTo(1f, tween(400, easing = easeOut)) }; launch { step2Y.animateTo(0f, tween(400, easing = easeOut)) } }
+        launch { delay(1700); launch { step3Alpha.animateTo(1f, tween(400, easing = easeOut)) }; launch { step3Y.animateTo(0f, tween(400, easing = easeOut)) } }
+        launch { delay(2000); launch { skipAlpha.animateTo(1f, tween(400)) }; launch { skipY.animateTo(0f, tween(400)) } }
+    }
+
+    // Dot travel animation
+    val dotPhase = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            dotPhase.snapTo(0f)
+            dotPhase.animateTo(1f, tween(2000, easing = LinearEasing))
+        }
+    }
+
+    // Cursor drift animation
+    val cursorTime = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            cursorTime.snapTo(0f)
+            cursorTime.animateTo(1f, tween(3000, easing = LinearEasing))
+        }
+    }
+
+    // BT ring pulse
+    val ring1Scale = remember { Animatable(0.8f) }
+    val ring1Alpha = remember { Animatable(0.3f) }
+    val ring2Scale = remember { Animatable(0.8f) }
+    val ring2Alpha = remember { Animatable(0.3f) }
+    LaunchedEffect(Unit) {
+        launch {
+            while (true) {
+                ring1Scale.snapTo(0.8f); ring1Alpha.snapTo(0.3f)
+                launch { ring1Scale.animateTo(1.35f, tween(2800)) }
+                launch { ring1Alpha.animateTo(0f, tween(2800)) }
+                delay(2800)
+            }
+        }
+        launch {
+            delay(900)
+            while (true) {
+                ring2Scale.snapTo(0.8f); ring2Alpha.snapTo(0.3f)
+                launch { ring2Scale.animateTo(1.35f, tween(2800)) }
+                launch { ring2Alpha.animateTo(0f, tween(2800)) }
+                delay(2800)
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier.fillMaxSize().background(bg),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(top = 52.dp, start = 28.dp, end = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Brand
             Text(
-                text = "PhonePad",
-                color = Color.White.copy(alpha = textAlpha.value),
-                fontSize = 30.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
-                modifier = Modifier.offset(y = textSlide.value.dp)
+                "Mouskey", color = ink, fontSize = 34.sp, fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily(Font(R.font.caveat_bold)), letterSpacing = 1.sp,
+                modifier = Modifier.graphicsLayer { alpha = brandAlpha.value; translationY = brandY.value * 3f }
             )
-            Spacer(modifier = Modifier.height(6.dp))
+
+            Spacer(Modifier.height(8.dp))
+
+            // Headline
             Text(
-                text = "bluetooth trackpad",
-                color = Color(0xFF2DD4BF).copy(alpha = textAlpha.value * 0.7f),
-                fontSize = 13.sp,
-                letterSpacing = 3.sp,
-                modifier = Modifier.offset(y = textSlide.value.dp)
+                text = buildAnnotatedString {
+                    append("Your phone, your\n")
+                    withStyle(SpanStyle(color = accent)) {
+                        append("trackpad & keyboard")
+                    }
+                },
+                color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold,
+                lineHeight = 26.sp, textAlign = TextAlign.Center,
+                letterSpacing = (-0.02).sp,
+                modifier = Modifier.graphicsLayer { alpha = headAlpha.value; translationY = headY.value * 3f }
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            // Subtitle
+            Text(
+                "Control your computer wirelessly — no apps to install, no cables needed.",
+                color = mute, fontSize = 12.5.sp, fontWeight = FontWeight.Normal,
+                lineHeight = 19.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.75f)
+                    .graphicsLayer { alpha = subAlpha.value; translationY = subY.value * 3f }
             )
         }
+
+        Spacer(Modifier.height(20.dp))
+
+        // Device illustration row
+        Row(
+            modifier = Modifier.height(100.dp)
+                .graphicsLayer { alpha = devAlpha.value; translationY = devY.value * 3f },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            // Phone device
+            Box(
+                modifier = Modifier.size(46.dp, 78.dp)
+                    .border(2.5.dp, accent, RoundedCornerShape(11.dp))
+                    .background(card, RoundedCornerShape(11.dp))
+                    .padding(6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    // Surface
+                    Box(
+                        modifier = Modifier.size(26.dp, 18.dp)
+                            .background(stepBg, RoundedCornerShape(3.dp))
+                            .border(1.dp, Color(0x146B5E4F), RoundedCornerShape(3.dp))
+                    )
+                    // Keys grid
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        for (r in 0 until 3) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                                for (c in 0 until 5) {
+                                    Box(
+                                        modifier = Modifier.size(4.8.dp, 3.dp)
+                                            .background(accent.copy(alpha = 0.2f), RoundedCornerShape(1.dp))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                // Home indicator
+                Box(
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .offset(y = 2.dp)
+                        .size(12.dp, 2.dp)
+                        .background(mute.copy(alpha = 0.25f), RoundedCornerShape(2.dp))
+                )
+            }
+
+            // Connection segment 1
+            Box(modifier = Modifier.width(32.dp).height(4.dp)) {
+                Box(modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.Center)
+                    .background(accent.copy(alpha = 0.1f), RoundedCornerShape(1.dp)))
+                // Animated dots
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val p1 = dotPhase.value
+                    val a1 = if (p1 < 0.15f || p1 > 0.85f) 0f else 0.6f
+                    drawCircle(accent.copy(alpha = a1), 2.dp.toPx(), Offset(p1 * (w - 4.dp.toPx()), size.height / 2f))
+                    val p2 = (dotPhase.value - 0.3f).coerceIn(0f, 1f) / 0.7f
+                    val a2 = if (p2 <= 0f || p2 >= 1f || dotPhase.value < 0.3f) 0f else 0.6f
+                    drawCircle(accent.copy(alpha = a2), 2.dp.toPx(), Offset(p2 * (w - 4.dp.toPx()), size.height / 2f))
+                }
+            }
+
+            // Bluetooth badge
+            Box(
+                modifier = Modifier.size(36.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // Pulsing rings
+                Box(
+                    modifier = Modifier.size(46.dp)
+                        .graphicsLayer { scaleX = ring1Scale.value; scaleY = ring1Scale.value; alpha = ring1Alpha.value }
+                        .border(1.5.dp, accent, RoundedCornerShape(15.dp))
+                )
+                Box(
+                    modifier = Modifier.size(46.dp)
+                        .graphicsLayer { scaleX = ring2Scale.value; scaleY = ring2Scale.value; alpha = ring2Alpha.value }
+                        .border(1.5.dp, accent, RoundedCornerShape(15.dp))
+                )
+                // Badge
+                Box(
+                    modifier = Modifier.size(36.dp)
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                listOf(accent, Color(0xFF47403a)),
+                                start = Offset(0f, 0f), end = Offset(36f, 36f)
+                            ),
+                            shape = RoundedCornerShape(11.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // BT icon
+                    Canvas(modifier = Modifier.size(16.dp)) {
+                        val s = size.width
+                        val path = Path().apply {
+                            moveTo(s * 0.27f, s * 0.27f)
+                            lineTo(s * 0.73f, s * 0.73f)
+                            lineTo(s * 0.5f, s * 0.96f)
+                            lineTo(s * 0.5f, s * 0.04f)
+                            lineTo(s * 0.73f, s * 0.27f)
+                            lineTo(s * 0.27f, s * 0.73f)
+                        }
+                        drawPath(path, Color.White, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    }
+                }
+            }
+
+            // Connection segment 2
+            Box(modifier = Modifier.width(32.dp).height(4.dp)) {
+                Box(modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.Center)
+                    .background(accent.copy(alpha = 0.1f), RoundedCornerShape(1.dp)))
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val p1 = dotPhase.value
+                    val a1 = if (p1 < 0.15f || p1 > 0.85f) 0f else 0.6f
+                    drawCircle(accent.copy(alpha = a1), 2.dp.toPx(), Offset(p1 * (w - 4.dp.toPx()), size.height / 2f))
+                    val p2 = (dotPhase.value - 0.3f).coerceIn(0f, 1f) / 0.7f
+                    val a2 = if (p2 <= 0f || p2 >= 1f || dotPhase.value < 0.3f) 0f else 0.6f
+                    drawCircle(accent.copy(alpha = a2), 2.dp.toPx(), Offset(p2 * (w - 4.dp.toPx()), size.height / 2f))
+                }
+            }
+
+            // Laptop device
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Lid
+                Box(
+                    modifier = Modifier.size(66.dp, 44.dp)
+                        .border(2.5.dp, accent, RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
+                        .background(card, RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
+                        .padding(6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Screen
+                    Box(
+                        modifier = Modifier.size(48.dp, 28.dp)
+                            .background(stepBg, RoundedCornerShape(3.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Cursor dot
+                        val cx = 6f * sin(cursorTime.value * 2f * 3.14159f * 0.25f + 0.5f)
+                        val cy = 4f * cos(cursorTime.value * 2f * 3.14159f * 0.5f)
+                        Box(
+                            modifier = Modifier.size(6.dp)
+                                .offset(x = cx.dp, y = cy.dp)
+                                .background(accent.copy(alpha = 0.4f), CircleShape)
+                        )
+                    }
+                }
+                // Base
+                Box(
+                    modifier = Modifier.size(76.dp, 4.dp)
+                        .background(accent.copy(alpha = 0.15f), RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // OS-style panel
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(1f)
+                .padding(horizontal = 28.dp)
+                .graphicsLayer { alpha = panelAlpha.value; translationY = panelY.value * 3f }
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+                    .background(winBg, RoundedCornerShape(14.dp))
+                    .border(1.dp, winBorder, RoundedCornerShape(14.dp))
+            ) {
+                // Titlebar
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Window dots
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(7.dp).background(mute.copy(alpha = 0.2f), CircleShape))
+                        Box(Modifier.size(7.dp).background(mute.copy(alpha = 0.2f), CircleShape))
+                        Box(Modifier.size(7.dp).background(mute.copy(alpha = 0.2f), CircleShape))
+                    }
+                    Text(
+                        "Bluetooth setup", color = mute, fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold, letterSpacing = 0.02.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(36.dp))
+                }
+
+                // Divider
+                Box(Modifier.fillMaxWidth().height(1.dp).background(winBorder))
+
+                // Body
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp)) {
+                    // Bluetooth toggle row
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Bluetooth", color = ink, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        // Toggle (static, always on)
+                        Box(
+                            modifier = Modifier.size(38.dp, 22.dp)
+                                .background(accent, RoundedCornerShape(11.dp)),
+                            contentAlignment = Alignment.CenterEnd
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(3.dp).size(16.dp)
+                                    .background(winBg, CircleShape)
+                            )
+                        }
+                    }
+
+                    // Divider
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(winBorder))
+
+                    Spacer(Modifier.height(14.dp))
+
+                    // Steps
+                    // Step 1
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .graphicsLayer { alpha = step1Alpha.value; translationY = step1Y.value * 3f }
+                            .background(winHover, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier.size(26.dp)
+                                .border(1.5.dp, accent, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("1", color = accent, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily(Font(R.font.caveat_bold)))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Open Bluetooth settings", color = ink, fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold, lineHeight = 16.sp)
+                            Text("Settings → Bluetooth & devices", color = mute, fontSize = 10.sp,
+                                lineHeight = 13.sp)
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    // Step 2
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .graphicsLayer { alpha = step2Alpha.value; translationY = step2Y.value * 3f }
+                            .background(winHover, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier.size(26.dp)
+                                .border(1.5.dp, accent, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("2", color = accent, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily(Font(R.font.caveat_bold)))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Add a new device", color = ink, fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold, lineHeight = 16.sp)
+                            Text("Choose Bluetooth from the list", color = mute, fontSize = 10.sp,
+                                lineHeight = 13.sp)
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    // Step 3
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .graphicsLayer { alpha = step3Alpha.value; translationY = step3Y.value * 3f }
+                            .background(winHover, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier.size(26.dp)
+                                .border(1.5.dp, accent, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("3", color = accent, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily(Font(R.font.caveat_bold)))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Select your phone", color = ink, fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold, lineHeight = 16.sp)
+                            Text("It shows by its Bluetooth name", color = mute, fontSize = 10.sp,
+                                lineHeight = 13.sp)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                // Skip button
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "I'll set up later", color = mute, fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium, letterSpacing = 0.02.sp,
+                        modifier = Modifier
+                            .graphicsLayer { alpha = skipAlpha.value; translationY = skipY.value * 3f }
+                            .border(1.5.dp, winBorder, RoundedCornerShape(20.dp))
+                            .background(winBg, RoundedCornerShape(20.dp))
+                            .clickable { onSetupLater() }
+                            .padding(horizontal = 28.dp, vertical = 9.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
     }
 }
 
@@ -2934,359 +3863,643 @@ fun CompatFailScreen(deviceModel: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun OnboardingScreen(
-    onComplete: () -> Unit,
-    onSkip: () -> Unit,
+fun HomeScreen(
+    isBluetoothConnected: Boolean,
+    onModeSelected: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val pagerState = rememberPagerState(pageCount = { 4 })
-    val scope = rememberCoroutineScope()
+    val bg = Color(0xFFece6dc)
+    val ink = Color(0xFF2e2a24)
+    val mute = Color(0xFF7d756a)
+    val accent = Color(0xFF6b5e4f)
+    val winBg = Color(0xFFf5f1eb)
+    val winBorder = Color(0x1A6B5E4F)
+    val tileBg = Color(0xFFe4ded4)
+    val tileBorder = Color(0x0D000000)
+    val keyFace = Color(0xFFf0ebe3)
+    val keySide = Color(0xFFbfb8ac)
+    val keyText = Color(0x8C3C3428)
+    val keyStroke = Color(0x14000000)
+    val tpSurface = Color(0xFFd6d0c5)
+    val tpBorder = Color(0x12000000)
 
-    Column(modifier = modifier.fillMaxSize()) {
-        // Skip button
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End
+    var showBtDialog by remember { mutableStateOf(false) }
+    var pendingMode by remember { mutableStateOf<AppScreen?>(null) }
+
+    val easeOut = CubicBezierEasing(0.2f, 1f, 0.3f, 1f)
+
+    val brandAlpha = remember { Animatable(0f) }
+    val brandY = remember { Animatable(10f) }
+    val headAlpha = remember { Animatable(0f) }
+    val headY = remember { Animatable(10f) }
+    val subAlpha = remember { Animatable(0f) }
+    val subY = remember { Animatable(10f) }
+    val panelAlpha = remember { Animatable(0f) }
+    val panelY = remember { Animatable(10f) }
+    val mod1Alpha = remember { Animatable(0f) }
+    val mod1Y = remember { Animatable(8f) }
+    val mod2Alpha = remember { Animatable(0f) }
+    val mod2Y = remember { Animatable(8f) }
+    val mod3Alpha = remember { Animatable(0f) }
+    val mod3Y = remember { Animatable(8f) }
+
+    LaunchedEffect(Unit) {
+        launch { delay(150); launch { brandAlpha.animateTo(1f, tween(600, easing = easeOut)) }; launch { brandY.animateTo(0f, tween(600, easing = easeOut)) } }
+        launch { delay(350); launch { headAlpha.animateTo(1f, tween(600, easing = easeOut)) }; launch { headY.animateTo(0f, tween(600, easing = easeOut)) } }
+        launch { delay(550); launch { subAlpha.animateTo(1f, tween(500)) }; launch { subY.animateTo(0f, tween(500)) } }
+        launch { delay(700); launch { panelAlpha.animateTo(1f, tween(600, easing = easeOut)) }; launch { panelY.animateTo(0f, tween(600, easing = easeOut)) } }
+        launch { delay(1000); launch { mod1Alpha.animateTo(1f, tween(500, easing = easeOut)) }; launch { mod1Y.animateTo(0f, tween(500, easing = easeOut)) } }
+        launch { delay(1100); launch { mod2Alpha.animateTo(1f, tween(500, easing = easeOut)) }; launch { mod2Y.animateTo(0f, tween(500, easing = easeOut)) } }
+        launch { delay(1200); launch { mod3Alpha.animateTo(1f, tween(500, easing = easeOut)) }; launch { mod3Y.animateTo(0f, tween(500, easing = easeOut)) } }
+    }
+
+    // Trackpad cursor animation
+    val cursorTime = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            cursorTime.snapTo(0f)
+            cursorTime.animateTo(1f, tween(4600, easing = LinearEasing))
+        }
+    }
+
+    // Split cursor animation
+    val splitTime = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            splitTime.snapTo(0f)
+            splitTime.animateTo(1f, tween(3000, easing = LinearEasing))
+        }
+    }
+
+    // Keyboard typing animation
+    val kbTypingIndex = remember { mutableStateOf(0) }
+    val kbCaretVisible = remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(300)
+            kbTypingIndex.value = (kbTypingIndex.value + 1) % 14
+        }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(530)
+            kbCaretVisible.value = !kbCaretVisible.value
+        }
+    }
+
+    fun handleModeTap(mode: AppScreen) {
+        if (isBluetoothConnected) {
+            onModeSelected(mode)
+        } else {
+            pendingMode = mode
+            showBtDialog = true
+        }
+    }
+
+    Column(
+        modifier = modifier.fillMaxSize().background(bg),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(top = 52.dp, start = 28.dp, end = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            TextButton(onClick = onSkip) {
-                Text("Skip", fontSize = 14.sp)
-            }
+            Text(
+                "Mouskey", color = ink, fontSize = 34.sp, fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily(Font(R.font.caveat_bold)), letterSpacing = 1.sp,
+                modifier = Modifier.graphicsLayer { alpha = brandAlpha.value; translationY = brandY.value * 3f }
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = buildAnnotatedString {
+                    append("Your phone, your\n")
+                    withStyle(SpanStyle(color = accent)) { append("trackpad & keyboard") }
+                },
+                color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold,
+                lineHeight = 26.sp, textAlign = TextAlign.Center, letterSpacing = (-0.02).sp,
+                modifier = Modifier.graphicsLayer { alpha = headAlpha.value; translationY = headY.value * 3f }
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Control your computer wirelessly — no apps to install, no cables needed.",
+                color = mute, fontSize = 12.5.sp, fontWeight = FontWeight.Normal,
+                lineHeight = 19.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.75f)
+                    .graphicsLayer { alpha = subAlpha.value; translationY = subY.value * 3f }
+            )
         }
 
-        // Pager
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.weight(1f)
-        ) { page ->
-            when (page) {
-                0 -> OnboardingPage(
-                    icon = Icons.Filled.TouchApp,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    heading = "Your phone is now a trackpad",
-                    body = "Turn your phone into a wireless trackpad for your Windows PC.",
-                    illustration = { OnboardingIllustrationPhoneTrackpad() }
-                )
-                1 -> OnboardingPage(
-                    icon = null,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    heading = "What you need",
-                    body = "Just a Bluetooth-enabled PC. That's it.",
-                    illustration = { OnboardingIllustrationChecklist() }
-                )
-                2 -> OnboardingPage(
-                    icon = null,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    heading = "How it works",
-                    body = "Your phone connects directly over Bluetooth.",
-                    illustration = { OnboardingIllustrationFlow() }
-                )
-                3 -> OnboardingPage(
-                    icon = Icons.Filled.Bluetooth,
-                    iconTint = MaterialTheme.colorScheme.secondary,
-                    heading = "Ready to pair?",
-                    body = "Let's get your phone connected to your computer.",
-                    illustration = null,
-                    action = {
-                        Spacer(modifier = Modifier.height(32.dp))
-                        Button(
-                            onClick = onComplete,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 32.dp)
-                                .height(52.dp),
-                            shape = RoundedCornerShape(12.dp)
+        Spacer(Modifier.height(20.dp))
+
+        // OS-style panel
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(1f)
+                .padding(horizontal = 28.dp)
+                .graphicsLayer { alpha = panelAlpha.value; translationY = panelY.value * 3f }
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+                    .background(winBg, RoundedCornerShape(14.dp))
+                    .border(1.dp, winBorder, RoundedCornerShape(14.dp))
+            ) {
+                // Titlebar
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Choose a mode", color = mute, fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold, letterSpacing = 0.02.sp
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(winBorder))
+
+                // Body — mode grid
+                Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Top row: Trackpad + Split
+                        Row(
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("Set Up", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                            // Trackpad tile
+                            Column(
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                                    .graphicsLayer { alpha = mod1Alpha.value; translationY = mod1Y.value * 3f }
+                                    .background(tileBg, RoundedCornerShape(12.dp))
+                                    .border(1.dp, tileBorder, RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { handleModeTap(AppScreen.TRACKPAD) }
+                            ) {
+                                // Illustration area — matches SVG viewBox 120x150
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        val cw = size.width; val ch = size.height
+                                        val vbW = 120f; val vbH = 150f
+                                        val sc = minOf(cw / vbW, ch / vbH)
+                                        val ox = (cw - vbW * sc) / 2f
+                                        val oy = (ch - vbH * sc) / 2f
+                                        fun sx(x: Float) = ox + x * sc
+                                        fun sy(y: Float) = oy + y * sc
+                                        fun ss(s: Float) = s * sc
+
+                                        val t = cursorTime.value
+                                        // Cursor waypoints in viewBox coords
+                                        val pts = listOf(
+                                            0f to Offset(60f, 60f),
+                                            0.195f to Offset(85f, 35f),
+                                            0.39f to Offset(78f, 90f),
+                                            0.54f to Offset(35f, 70f),
+                                            0.695f to Offset(68f, 110f),
+                                            0.87f to Offset(60f, 60f)
+                                        )
+                                        var si = 0
+                                        for (i in 0 until pts.size - 1) {
+                                            if (t >= pts[i].first && t < pts[i + 1].first) { si = i; break }
+                                        }
+                                        if (t >= pts.last().first) si = pts.size - 2
+                                        val a = pts[si]; val b = pts[si + 1]
+                                        val p = ((t - a.first) / (b.first - a.first)).coerceIn(0f, 1f)
+                                        val ep = if (p < 0.5f) 2f * p * p else 1f - (-2f * p + 2f).pow(2) / 2f
+                                        val cx = a.second.x + (b.second.x - a.second.x) * ep
+                                        val cy = a.second.y + (b.second.y - a.second.y) * ep
+
+                                        val cursorPath = Path().apply {
+                                            moveTo(sx(cx - 3.8f), sy(cy - 5.2f))
+                                            lineTo(sx(cx - 3.8f), sy(cy + 3.8f))
+                                            lineTo(sx(cx - 1.1f), sy(cy + 1.9f))
+                                            lineTo(sx(cx + 1.4f), sy(cy + 6.6f))
+                                            lineTo(sx(cx + 3f), sy(cy + 5.5f))
+                                            lineTo(sx(cx + 0.9f), sy(cy + 0.9f))
+                                            lineTo(sx(cx + 3.6f), sy(cy + 0.5f))
+                                            close()
+                                        }
+                                        drawPath(cursorPath, ink.copy(alpha = 0.7f))
+
+                                        // 3 dots at bottom
+                                        drawCircle(keySide.copy(alpha = 0.4f), ss(1.2f), Offset(sx(54f), sy(140f)))
+                                        drawCircle(accent.copy(alpha = 0.5f), ss(1.2f), Offset(sx(60f), sy(140f)))
+                                        drawCircle(keySide.copy(alpha = 0.4f), ss(1.2f), Offset(sx(66f), sy(140f)))
+                                    }
+                                }
+                                // Label strip
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().height(30.dp)
+                                        .drawBehind { drawLine(tileBorder, Offset(0f, 0f), Offset(size.width, 0f), 1f) }
+                                        .padding(horizontal = 10.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Trackpad", color = accent, fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold, letterSpacing = 0.02.sp)
+                                        Box(
+                                            modifier = Modifier.size(16.dp)
+                                                .background(accent.copy(alpha = 0.12f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Canvas(modifier = Modifier.size(7.dp)) {
+                                                val path = Path().apply {
+                                                    moveTo(size.width * 0.25f, size.height * 0.1f)
+                                                    lineTo(size.width * 0.75f, size.height * 0.5f)
+                                                    lineTo(size.width * 0.25f, size.height * 0.9f)
+                                                }
+                                                drawPath(path, accent, style = Stroke(width = 2.5f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Split Mode tile
+                            Column(
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                                    .graphicsLayer { alpha = mod2Alpha.value; translationY = mod2Y.value * 3f }
+                                    .background(tileBg, RoundedCornerShape(12.dp))
+                                    .border(1.dp, tileBorder, RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { handleModeTap(AppScreen.SPLIT) }
+                            ) {
+                                // Split illustration
+                                Column(
+                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(5.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    // Trackpad portion (62%) — matches SVG viewBox 100x100
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().weight(0.62f)
+                                            .background(tpSurface, RoundedCornerShape(6.dp))
+                                            .border(0.8.dp, tpBorder, RoundedCornerShape(6.dp))
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            val cw = size.width; val ch = size.height
+                                            val vbS = 100f
+                                            val sc = minOf(cw / vbS, ch / vbS)
+                                            val osx = (cw - vbS * sc) / 2f
+                                            val osy = (ch - vbS * sc) / 2f
+                                            fun lx(x: Float) = osx + x * sc
+                                            fun ly(y: Float) = osy + y * sc
+
+                                            val st = splitTime.value * 2f * 3.14159f
+                                            val cx = 50f + sin(st) * 32f
+                                            val cy = 50f + cos(st * 0.7f) * 28f
+                                            val cursorPath = Path().apply {
+                                                moveTo(lx(cx - 3f), ly(cy - 4.2f))
+                                                lineTo(lx(cx - 3f), ly(cy + 3f))
+                                                lineTo(lx(cx - 0.8f), ly(cy + 1.5f))
+                                                lineTo(lx(cx + 1.1f), ly(cy + 5.2f))
+                                                lineTo(lx(cx + 2.4f), ly(cy + 4.3f))
+                                                lineTo(lx(cx + 0.7f), ly(cy + 0.7f))
+                                                lineTo(lx(cx + 2.8f), ly(cy + 0.4f))
+                                                close()
+                                            }
+                                            drawPath(cursorPath, ink.copy(alpha = 0.7f))
+                                        }
+                                    }
+                                    // Keyboard portion (38%)
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().weight(0.38f)
+                                            .drawBehind {
+                                                drawRoundRect(keySide, topLeft = Offset(0f, 1.5.dp.toPx()),
+                                                    size = size.copy(), cornerRadius = CornerRadius(6.dp.toPx()))
+                                            }
+                                            .background(keyFace, RoundedCornerShape(6.dp))
+                                            .border(0.8.dp, keyStroke, RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 5.dp, vertical = 4.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        repeat(4) {
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth().height(2.5.dp)
+                                                    .background(keySide.copy(alpha = 0.45f), RoundedCornerShape(1.2.dp))
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth(0.55f).height(2.5.dp)
+                                                .background(keySide.copy(alpha = 0.35f), RoundedCornerShape(1.2.dp))
+                                        )
+                                    }
+                                }
+                                // Label strip
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().height(30.dp)
+                                        .drawBehind { drawLine(tileBorder, Offset(0f, 0f), Offset(size.width, 0f), 1f) }
+                                        .padding(horizontal = 10.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Split Mode", color = accent, fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold, letterSpacing = 0.02.sp)
+                                        Box(
+                                            modifier = Modifier.size(16.dp)
+                                                .background(accent.copy(alpha = 0.12f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Canvas(modifier = Modifier.size(7.dp)) {
+                                                val path = Path().apply {
+                                                    moveTo(size.width * 0.25f, size.height * 0.1f)
+                                                    lineTo(size.width * 0.75f, size.height * 0.5f)
+                                                    lineTo(size.width * 0.25f, size.height * 0.9f)
+                                                }
+                                                drawPath(path, accent, style = Stroke(width = 2.5f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Bottom row: Keyboard (full width)
+                        Column(
+                            modifier = Modifier.fillMaxWidth().weight(1f)
+                                .graphicsLayer { alpha = mod3Alpha.value; translationY = mod3Y.value * 3f }
+                                .background(tileBg, RoundedCornerShape(12.dp))
+                                .border(1.dp, tileBorder, RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { handleModeTap(AppScreen.KEYBOARD) }
+                        ) {
+                            // Keyboard illustration — matches SVG viewBox 200x107
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val cw = size.width
+                                    val ch = size.height
+                                    // Scale from 200x107 viewBox to fill
+                                    val vbW = 200f; val vbH = 107f
+                                    val sc = minOf(cw / vbW, ch / vbH)
+                                    val ox = (cw - vbW * sc) / 2f
+                                    val oy = (ch - vbH * sc) / 2f
+
+                                    fun sx(x: Float) = ox + x * sc
+                                    fun sy(y: Float) = oy + y * sc
+                                    fun ss(s: Float) = s * sc
+
+                                    val W = 14f; val H = 11.5f; val G = 2f; val R = 3f
+                                    val r10 = 10f * W + 9f * G
+                                    val kx10 = (200f - r10) / 2f
+                                    val r9 = 9f * W + 8f * G
+                                    val kx9 = (200f - r9) / 2f
+                                    val KY0 = 10f; val KRH = 15f
+
+                                    val word = "mouskey"
+                                    val typedCount = if (kbTypingIndex.value < 7) kbTypingIndex.value else 7
+                                    val litChar = if (kbTypingIndex.value < 7) word.getOrNull(kbTypingIndex.value)?.uppercaseChar() else if (kbTypingIndex.value == 7) ' ' else null
+
+                                    fun drawKey(x: Float, y: Float, w: Float, h: Float, r: Float, isLit: Boolean, label: String = "", fs: Float = 5f) {
+                                        val d = maxOf(2.2f, r * 0.75f)
+                                        // Shadow/side
+                                        drawRoundRect(
+                                            if (isLit) Color(0xFF564a3d) else keySide,
+                                            topLeft = Offset(sx(x), sy(y + d)),
+                                            size = Size(ss(w), ss(h)),
+                                            cornerRadius = CornerRadius(ss(r))
+                                        )
+                                        // Face
+                                        drawRoundRect(
+                                            if (isLit) accent else keyFace,
+                                            topLeft = Offset(sx(x), sy(y)),
+                                            size = Size(ss(w), ss(h)),
+                                            cornerRadius = CornerRadius(ss(r))
+                                        )
+                                        drawRoundRect(
+                                            keyStroke,
+                                            topLeft = Offset(sx(x), sy(y)),
+                                            size = Size(ss(w), ss(h)),
+                                            cornerRadius = CornerRadius(ss(r)),
+                                            style = Stroke(ss(0.5f))
+                                        )
+                                        // Label
+                                        if (label.isNotEmpty() && fs > 0f) {
+                                            val paint = android.graphics.Paint().apply {
+                                                color = if (isLit) android.graphics.Color.argb(216, 255, 255, 255)
+                                                else android.graphics.Color.argb(140, 60, 52, 40)
+                                                textSize = ss(fs)
+                                                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                                                isAntiAlias = true
+                                                textAlign = android.graphics.Paint.Align.CENTER
+                                            }
+                                            val dispLabel = if (label.length <= 2) label.lowercase() else label
+                                            drawContext.canvas.nativeCanvas.drawText(
+                                                dispLabel, sx(x + w / 2f), sy(y + h * 0.68f), paint
+                                            )
+                                        }
+                                    }
+
+                                    // Row 0 — Esc (lit) + 9 symbol keys
+                                    drawKey(kx10, KY0, W, H, R, true, "Esc", 3.8f)
+                                    val symRow = listOf("×","*","·","·","|","·","|","·","·")
+                                    symRow.forEachIndexed { i, c ->
+                                        drawKey(kx10 + (i + 1) * (W + G), KY0, W, H, R, false, c, 5f)
+                                    }
+
+                                    // Row 1 — QWERTY
+                                    "QWERTYUIOP".forEachIndexed { i, c ->
+                                        drawKey(kx10 + i * (W + G), KY0 + KRH, W, H, R, c == litChar, c.toString(), 5f)
+                                    }
+
+                                    // Row 2 — ASDF (9 keys, centered)
+                                    "ASDFGHJKL".forEachIndexed { i, c ->
+                                        drawKey(kx9 + i * (W + G), KY0 + KRH * 2, W, H, R, c == litChar, c.toString(), 5f)
+                                    }
+
+                                    // Row 3 — Shift + ZXCVBNM + Backspace
+                                    val ksw = W * 1.5f
+                                    val kz7 = 7f * W + 6f * G
+                                    val kzt = ksw + G + kz7 + G + ksw
+                                    val kzx = (200f - kzt) / 2f
+                                    drawKey(kzx, KY0 + KRH * 3, ksw, H, R, false, "⇧", 5f)
+                                    "ZXCVBNM".forEachIndexed { i, c ->
+                                        drawKey(kzx + ksw + G + i * (W + G), KY0 + KRH * 3, W, H, R, c == litChar, c.toString(), 5f)
+                                    }
+                                    drawKey(kzx + kzt - ksw, KY0 + KRH * 3, ksw, H, R, false, "⌫", 4.5f)
+
+                                    // Row 4 — Fn, Ctrl, Alt, Space, Enter
+                                    val kbY4 = KY0 + KRH * 4
+                                    val fnW = W * 1.1f; val ctrlW = W * 1.1f; val altW = W * 1.1f; val enterW = W * 1.6f
+                                    drawKey(kx10, kbY4, fnW, H, R, false, "Fn", 4f)
+                                    drawKey(kx10 + fnW + G, kbY4, ctrlW, H, R, false, "Ctrl", 3.5f)
+                                    drawKey(kx10 + fnW + G + ctrlW + G, kbY4, altW, H, R, false, "Alt", 4f)
+                                    val kAfter = kx10 + fnW + G + ctrlW + G + altW + G
+                                    val kEnd = kx10 + r10
+                                    val kSpW = kEnd - enterW - G - kAfter
+                                    drawKey(kAfter, kbY4, kSpW, H, R, litChar == ' ', "", 0f)
+                                    // Dot on spacebar
+                                    drawCircle(
+                                        keyText.copy(alpha = 0.4f), ss(0.8f),
+                                        Offset(sx(kAfter + kSpW / 2f), sy(kbY4 + H / 2f + 0.5f))
+                                    )
+                                    drawKey(kEnd - enterW, kbY4, enterW, H, R, false, "Enter", 3.5f)
+
+                                    // Text field
+                                    drawRoundRect(
+                                        tileBorder,
+                                        topLeft = Offset(sx(16f), sy(90f)),
+                                        size = Size(ss(168f), ss(12f)),
+                                        cornerRadius = CornerRadius(ss(3f))
+                                    )
+                                    val typed = word.take(typedCount)
+                                    val tfPaint = android.graphics.Paint().apply {
+                                        color = android.graphics.Color.argb(140, 60, 52, 40)
+                                        textSize = ss(4.5f)
+                                        typeface = android.graphics.Typeface.create("monospace", android.graphics.Typeface.NORMAL)
+                                        isAntiAlias = true
+                                    }
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        typed, sx(22f), sy(98.5f), tfPaint
+                                    )
+                                    // Caret
+                                    if (kbCaretVisible.value) {
+                                        val caretX = 22f + typed.length * 4.7f
+                                        drawRoundRect(
+                                            accent.copy(alpha = 0.6f),
+                                            topLeft = Offset(sx(caretX), sy(93f)),
+                                            size = Size(ss(0.7f), ss(7f)),
+                                            cornerRadius = CornerRadius(ss(0.4f))
+                                        )
+                                    }
+                                }
+                            }
+                            // Label strip
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(30.dp)
+                                    .drawBehind { drawLine(tileBorder, Offset(0f, 0f), Offset(size.width, 0f), 1f) }
+                                    .padding(horizontal = 10.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Keyboard", color = accent, fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold, letterSpacing = 0.02.sp)
+                                    Box(
+                                        modifier = Modifier.size(16.dp)
+                                            .background(accent.copy(alpha = 0.12f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Canvas(modifier = Modifier.size(7.dp)) {
+                                            val path = Path().apply {
+                                                moveTo(size.width * 0.25f, size.height * 0.1f)
+                                                lineTo(size.width * 0.75f, size.height * 0.5f)
+                                                lineTo(size.width * 0.25f, size.height * 0.9f)
+                                            }
+                                            drawPath(path, accent, style = Stroke(width = 2.5f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                )
+                }
             }
         }
 
-        // Dot indicators
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            repeat(4) { index ->
-                val selected = pagerState.currentPage == index
-                val dotColor by animateColorAsState(
-                    targetValue = if (selected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.outlineVariant,
-                    label = "dot$index"
-                )
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 4.dp)
-                        .size(if (selected) 10.dp else 8.dp)
-                        .clip(CircleShape)
-                        .background(dotColor)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun OnboardingPage(
-    icon: androidx.compose.ui.graphics.vector.ImageVector?,
-    iconTint: Color,
-    heading: String,
-    body: String,
-    illustration: (@Composable () -> Unit)?,
-    action: (@Composable () -> Unit)? = null
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        if (illustration != null) {
-            illustration()
-            Spacer(modifier = Modifier.height(32.dp))
-        } else if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = iconTint,
-                modifier = Modifier.size(72.dp)
-            )
-            Spacer(modifier = Modifier.height(32.dp))
-        }
-        Text(
-            text = heading,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = body,
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        if (action != null) {
-            action()
-        }
-    }
-}
-
-@Composable
-private fun OnboardingIllustrationPhoneTrackpad() {
-    val primary = MaterialTheme.colorScheme.primary
-    val accent = MaterialTheme.colorScheme.secondary
-
-    val phoneSlide = remember { Animatable(40f) }
-    val phoneAlpha = remember { Animatable(0f) }
-    val cursorAnim = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        launch { phoneAlpha.animateTo(1f, tween(600)) }
-        launch { phoneSlide.animateTo(0f, tween(700, easing = EaseOutCubic)) }
-        delay(400)
-        cursorAnim.animateTo(1f, tween(800, easing = EaseOutBack))
+        Spacer(Modifier.height(28.dp))
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "cursorFloat")
-    val cursorY by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 8f,
-        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "cursorY"
-    )
-
-    Canvas(
-        modifier = Modifier
-            .size(160.dp)
-            .alpha(phoneAlpha.value)
-            .offset(y = phoneSlide.value.dp)
-    ) {
-        val w = size.width
-        val h = size.height
-        // Glow behind phone
-        drawRoundRect(
-            brush = Brush.radialGradient(
-                listOf(primary.copy(alpha = 0.12f), Color.Transparent),
-                center = Offset(w * 0.5f, h * 0.45f),
-                radius = w * 0.35f
-            ),
-            topLeft = Offset(w * 0.25f, h * 0.05f),
-            size = Size(w * 0.5f, h * 0.8f),
-            cornerRadius = CornerRadius(w * 0.06f)
-        )
-        // Phone body
-        drawRoundRect(
-            color = primary,
-            topLeft = Offset(w * 0.3f, h * 0.1f),
-            size = Size(w * 0.4f, h * 0.7f),
-            cornerRadius = CornerRadius(w * 0.04f),
-            style = Stroke(width = 3f)
-        )
-        // Screen area
-        drawRoundRect(
-            color = primary.copy(alpha = 0.08f),
-            topLeft = Offset(w * 0.34f, h * 0.18f),
-            size = Size(w * 0.32f, h * 0.5f),
-            cornerRadius = CornerRadius(w * 0.02f)
-        )
-        // Cursor arrow — animated in with float
-        if (cursorAnim.value > 0f) {
-            val cScale = cursorAnim.value
-            val yOff = cursorY * cScale
-            val arrowPath = Path().apply {
-                moveTo(w * 0.45f, h * 0.3f + yOff)
-                lineTo(w * 0.45f, h * 0.55f + yOff)
-                lineTo(w * 0.50f, h * 0.48f + yOff)
-                lineTo(w * 0.57f, h * 0.58f + yOff)
-                lineTo(w * 0.60f, h * 0.55f + yOff)
-                lineTo(w * 0.53f, h * 0.45f + yOff)
-                lineTo(w * 0.59f, h * 0.42f + yOff)
-                close()
-            }
-            drawPath(arrowPath, color = accent.copy(alpha = cScale))
-        }
-    }
-}
-
-@Composable
-private fun OnboardingIllustrationChecklist() {
-    val accent = MaterialTheme.colorScheme.secondary
-    val textColor = MaterialTheme.colorScheme.onSurface
-    val items = listOf("Bluetooth-enabled PC", "No companion app needed", "No Wi-Fi required")
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-    ) {
-        items.forEachIndexed { index, text ->
-            var visible by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) {
-                delay(index * 300L + 200L)
-                visible = true
-            }
-            val itemAlpha by animateFloatAsState(
-                targetValue = if (visible) 1f else 0f, tween(400), label = "checkAlpha$index"
-            )
-            val itemSlide by animateFloatAsState(
-                targetValue = if (visible) 0f else 20f, tween(400, easing = EaseOutCubic), label = "checkSlide$index"
-            )
-            Box(modifier = Modifier.alpha(itemAlpha).offset(x = itemSlide.dp)) {
-                OnboardingCheckItem(text = text, checked = true, accent = accent, textColor = textColor)
-            }
-            if (index < items.lastIndex) Spacer(modifier = Modifier.height(12.dp))
-        }
-    }
-}
-
-@Composable
-private fun OnboardingCheckItem(text: String, checked: Boolean, accent: Color, textColor: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    // Bluetooth not connected dialog
+    if (showBtDialog) {
         Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(if (checked) accent.copy(alpha = 0.15f) else Color.Transparent),
+            modifier = Modifier.fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { showBtDialog = false },
             contentAlignment = Alignment.Center
         ) {
-            if (checked) {
-                Icon(
-                    imageVector = Icons.Filled.Check,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(18.dp)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.82f)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {}
+                    .background(winBg, RoundedCornerShape(20.dp))
+                    .border(1.dp, winBorder, RoundedCornerShape(20.dp))
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // BT icon with accent background
+                Box(
+                    modifier = Modifier.size(52.dp)
+                        .background(
+                            brush = Brush.linearGradient(
+                                listOf(accent, Color(0xFF47403a)),
+                                start = Offset(0f, 0f), end = Offset(52f, 52f)
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(22.dp)) {
+                        val s = size.width
+                        val path = Path().apply {
+                            moveTo(s * 0.27f, s * 0.27f)
+                            lineTo(s * 0.73f, s * 0.73f)
+                            lineTo(s * 0.5f, s * 0.96f)
+                            lineTo(s * 0.5f, s * 0.04f)
+                            lineTo(s * 0.73f, s * 0.27f)
+                            lineTo(s * 0.27f, s * 0.73f)
+                        }
+                        drawPath(path, Color.White, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    }
+                }
+
+                Spacer(Modifier.height(18.dp))
+
+                Text(
+                    "No device connected", color = ink, fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold, textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    "Pair your phone with a computer via Bluetooth first to use this mode.",
+                    color = mute, fontSize = 13.sp, lineHeight = 19.sp,
+                    textAlign = TextAlign.Center, fontWeight = FontWeight.Normal
+                )
+
+                Spacer(Modifier.height(22.dp))
+
+                // Pair now button
+                Text(
+                    "Set up Bluetooth", color = winBg, fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold, letterSpacing = 0.02.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(accent, RoundedCornerShape(12.dp))
+                        .clickable {
+                            showBtDialog = false
+                            onModeSelected(AppScreen.CONNECT)
+                        }
+                        .padding(vertical = 13.dp),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(10.dp))
+
+                // Dismiss
+                Text(
+                    "Maybe later", color = mute, fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable { showBtDialog = false }
+                        .padding(vertical = 6.dp)
                 )
             }
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(text = text, fontSize = 16.sp, color = textColor)
-    }
-}
-
-@Composable
-private fun OnboardingIllustrationFlow() {
-    val primary = MaterialTheme.colorScheme.primary
-    val accent = MaterialTheme.colorScheme.secondary
-
-    var phoneVisible by remember { mutableStateOf(false) }
-    var btVisible by remember { mutableStateOf(false) }
-    var pcVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        phoneVisible = true; delay(300)
-        btVisible = true; delay(300)
-        pcVisible = true
-    }
-
-    val phoneAlpha by animateFloatAsState(if (phoneVisible) 1f else 0f, tween(500), label = "pA")
-    val phoneX by animateFloatAsState(if (phoneVisible) 0f else -30f, tween(500, easing = EaseOutCubic), label = "pX")
-    val btAlpha by animateFloatAsState(if (btVisible) 1f else 0f, tween(400), label = "bA")
-    val btScale by animateFloatAsState(if (btVisible) 1f else 0.5f, tween(400, easing = EaseOutBack), label = "bS")
-    val pcAlpha by animateFloatAsState(if (pcVisible) 1f else 0f, tween(500), label = "pcA")
-    val pcX by animateFloatAsState(if (pcVisible) 0f else 30f, tween(500, easing = EaseOutCubic), label = "pcX")
-
-    // Pulsing signal dots between phone and PC
-    val infiniteTransition = rememberInfiniteTransition(label = "signal")
-    val signalPhase by infiniteTransition.animateFloat(
-        0f, 1f, infiniteRepeatable(tween(1200, easing = LinearEasing)), label = "sigPhase"
-    )
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Phone
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.alpha(phoneAlpha).offset(x = phoneX.dp)
-        ) {
-            Icon(Icons.Filled.PhoneAndroid, null, tint = primary, modifier = Modifier.size(48.dp))
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Phone", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        // Signal dots
-        Spacer(modifier = Modifier.width(8.dp))
-        Canvas(modifier = Modifier.size(width = 40.dp, height = 32.dp).alpha(btAlpha)) {
-            val dots = 3
-            for (i in 0 until dots) {
-                val phase = ((signalPhase + i * 0.33f) % 1f)
-                val x = size.width * phase
-                val alpha = if (phase < 0.5f) phase * 2f else (1f - phase) * 2f
-                drawCircle(accent.copy(alpha = alpha * 0.7f), radius = 3f, center = Offset(x, size.height / 2f))
-            }
-        }
-        // BT icon
-        Icon(
-            Icons.Filled.Bluetooth, null, tint = accent,
-            modifier = Modifier.size(32.dp).alpha(btAlpha).scale(btScale)
-        )
-        // Signal dots
-        Canvas(modifier = Modifier.size(width = 40.dp, height = 32.dp).alpha(btAlpha)) {
-            val dots = 3
-            for (i in 0 until dots) {
-                val phase = ((signalPhase + i * 0.33f) % 1f)
-                val x = size.width * phase
-                val alpha = if (phase < 0.5f) phase * 2f else (1f - phase) * 2f
-                drawCircle(accent.copy(alpha = alpha * 0.7f), radius = 3f, center = Offset(x, size.height / 2f))
-            }
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        // PC
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.alpha(pcAlpha).offset(x = pcX.dp)
-        ) {
-            Icon(Icons.Filled.Computer, null, tint = primary, modifier = Modifier.size(48.dp))
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("PC", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -3394,320 +4607,7 @@ fun PermissionDeniedScreen(
     }
 }
 
-@Composable
-fun PairingGuideScreen(
-    connectionStatus: String,
-    isConnected: Boolean,
-    connectedHostName: String?,
-    onNavigateToTrackpad: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // Connected celebration state
-    var showCelebration by remember { mutableStateOf(false) }
-    val celebrationScale = remember { Animatable(0f) }
-    val celebrationAlpha = remember { Animatable(0f) }
 
-    // Auto-navigate to trackpad after connection with celebration
-    LaunchedEffect(isConnected) {
-        if (isConnected) {
-            showCelebration = true
-            launch { celebrationAlpha.animateTo(1f, tween(300)) }
-            launch { celebrationScale.animateTo(1f, tween(500, easing = EaseOutBack)) }
-            delay(1800L)
-            launch { celebrationAlpha.animateTo(0f, tween(400)) }
-            delay(400)
-            onNavigateToTrackpad()
-        }
-    }
-
-    val scrollState = rememberScrollState()
-    var showTroubleshooting by remember { mutableStateOf(false) }
-
-    Box(modifier = modifier.fillMaxSize()) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(horizontal = 24.dp, vertical = 16.dp)
-    ) {
-        Text(
-            text = "Pairing Guide",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Follow these steps to connect your phone to your PC.",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Step 1
-        PairingStep(
-            number = 1,
-            title = "Open Bluetooth settings on your computer",
-            description = "Go to Windows Settings → Bluetooth & devices",
-            isActive = true,
-            isComplete = false
-        )
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Step 2
-        PairingStep(
-            number = 2,
-            title = "Tap 'Add Device' and choose 'Bluetooth'",
-            description = "Your computer will start scanning for nearby devices.",
-            isActive = true,
-            isComplete = false
-        )
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Step 3 - live status
-        PairingStep(
-            number = 3,
-            title = "Select your phone from the device list",
-            description = "It will appear by your phone's Bluetooth name.",
-            isActive = true,
-            isComplete = isConnected,
-            statusContent = {
-                Spacer(modifier = Modifier.height(8.dp))
-                PairingStatusIndicator(
-                    isConnected = isConnected,
-                    connectedHostName = connectedHostName
-                )
-            }
-        )
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Step 4
-        PairingStep(
-            number = 4,
-            title = if (isConnected) "You're all set!" else "Waiting for connection...",
-            description = if (isConnected) "Navigating to trackpad..." else null,
-            isActive = isConnected,
-            isComplete = isConnected
-        )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Troubleshooting
-        TextButton(onClick = { showTroubleshooting = !showTroubleshooting }) {
-            Text(
-                text = "Troubleshooting",
-                fontSize = 14.sp
-            )
-            Icon(
-                imageVector = if (showTroubleshooting) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-        AnimatedVisibility(visible = showTroubleshooting) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        MaterialTheme.colorScheme.surfaceVariant,
-                        RoundedCornerShape(12.dp)
-                    )
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = "If your phone doesn't appear:",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = "- Make sure Bluetooth is enabled on both devices", fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "- Restart Bluetooth on your computer", fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "- Move your phone closer to the computer", fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "- Try removing your phone from paired devices and re-pairing", fontSize = 14.sp)
-            }
-        }
-    }
-
-    // Success celebration overlay
-    if (showCelebration) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = celebrationAlpha.value * 0.85f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .alpha(celebrationAlpha.value)
-                    .scale(celebrationScale.value)
-            ) {
-                // Success checkmark with ring
-                Canvas(modifier = Modifier.size(96.dp)) {
-                    val w = size.width
-                    val strokeW = 4f
-                    // Outer ring
-                    drawCircle(
-                        color = Color(0xFF0D9488),
-                        radius = w / 2f - strokeW,
-                        style = Stroke(width = strokeW)
-                    )
-                    // Inner glow
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            listOf(Color(0xFF0D9488).copy(alpha = 0.15f), Color.Transparent)
-                        ),
-                        radius = w / 2f
-                    )
-                    // Checkmark
-                    val check = Path().apply {
-                        moveTo(w * 0.28f, w * 0.5f)
-                        lineTo(w * 0.44f, w * 0.65f)
-                        lineTo(w * 0.72f, w * 0.35f)
-                    }
-                    drawPath(check, Color(0xFF0D9488), style = Stroke(width = 5f, cap = StrokeCap.Round))
-                }
-                Spacer(modifier = Modifier.height(20.dp))
-                Text(
-                    text = "Connected!",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0D9488)
-                )
-                if (connectedHostName != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = connectedHostName,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-    } // close Box
-}
-
-@Composable
-private fun PairingStep(
-    number: Int,
-    title: String,
-    description: String?,
-    isActive: Boolean,
-    isComplete: Boolean,
-    statusContent: (@Composable () -> Unit)? = null
-) {
-    val circleColor by animateColorAsState(
-        targetValue = when {
-            isComplete -> MaterialTheme.colorScheme.secondary
-            isActive -> MaterialTheme.colorScheme.primary
-            else -> MaterialTheme.colorScheme.outlineVariant
-        },
-        label = "stepCircle$number"
-    )
-
-    Row(modifier = Modifier.fillMaxWidth()) {
-        // Numbered circle
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(circleColor),
-            contentAlignment = Alignment.Center
-        ) {
-            if (isComplete) {
-                Icon(
-                    imageVector = Icons.Filled.Check,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            } else {
-                Text(
-                    text = number.toString(),
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            if (description != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = description,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (statusContent != null) {
-                statusContent()
-            }
-        }
-    }
-}
-
-@Composable
-private fun PairingStatusIndicator(
-    isConnected: Boolean,
-    connectedHostName: String?
-) {
-    val statusColor by animateColorAsState(
-        targetValue = if (isConnected) MaterialTheme.colorScheme.secondary else Color(0xFFD97706),
-        label = "statusColor"
-    )
-
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        if (isConnected) {
-            Icon(
-                imageVector = Icons.Filled.CheckCircle,
-                contentDescription = null,
-                tint = statusColor,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Connected" + if (connectedHostName != null) " to $connectedHostName" else "",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = statusColor
-            )
-        } else {
-            // Pulsing dot
-            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-            val pulseAlpha by infiniteTransition.animateFloat(
-                initialValue = 0.3f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(800),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "pulseAlpha"
-            )
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .clip(CircleShape)
-                    .alpha(pulseAlpha)
-                    .background(statusColor)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Waiting for connection...",
-                fontSize = 14.sp,
-                color = statusColor
-            )
-        }
-    }
-}
 
 @OptIn(ExperimentalComposeUiApi::class)
 @SuppressLint("MissingPermission")

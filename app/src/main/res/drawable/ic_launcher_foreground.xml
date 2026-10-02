@@ -1,29 +1,99 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
+    android:viewportWidth="680"
+    android:viewportHeight="680">
 
-    <!-- Trackpad body — rounded rectangle centered in the 72dp safe zone (18–90) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M30,28 L78,28 A8,8 0,0 1,86,36 L86,80 A8,8 0,0 1,78,88 L30,88 A8,8 0,0 1,22,80 L22,36 A8,8 0,0 1,30,28 Z" />
+    <!-- Card background -->
+    <path android:fillColor="#e6e0d6" android:pathData="M138,90h404a48,48,0,0,1,48,48v404a48,48,0,0,1,-48,48h-404a48,48,0,0,1,-48,-48v-404a48,48,0,0,1,48,-48z"/>
 
-    <!-- Trackpad surface — inner area with slight inset -->
-    <path
-        android:fillColor="#E8E8F0"
-        android:pathData="M33,32 L75,32 A5,5 0,0 1,80,37 L80,76 A5,5 0,0 1,75,81 L33,81 A5,5 0,0 1,28,76 L28,37 A5,5 0,0 1,33,32 Z" />
+    <!-- Scattered background keys -->
+    <!-- Esc -->
+    <group android:pivotX="144" android:pivotY="140" android:rotation="-22">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.28" android:pathData="M118,124h52a10,10,0,0,1,10,10v20a10,10,0,0,1,-10,10h-52a10,10,0,0,1,-10,-10v-20a10,10,0,0,1,10,-10z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.28" android:pathData="M118,120h52a10,10,0,0,1,10,10v20a10,10,0,0,1,-10,10h-52a10,10,0,0,1,-10,-10v-20a10,10,0,0,1,10,-10z"/>
+    </group>
+    <!-- Tab -->
+    <group android:pivotX="500" android:pivotY="150" android:rotation="18">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.22" android:pathData="M470,134h60a10,10,0,0,1,10,10v20a10,10,0,0,1,-10,10h-60a10,10,0,0,1,-10,-10v-20a10,10,0,0,1,10,-10z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.22" android:pathData="M470,130h60a10,10,0,0,1,10,10v20a10,10,0,0,1,-10,10h-60a10,10,0,0,1,-10,-10v-20a10,10,0,0,1,10,-10z"/>
+    </group>
+    <!-- Fn -->
+    <group android:pivotX="535" android:pivotY="359" android:rotation="30">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.18" android:pathData="M510,344h50a10,10,0,0,1,10,10v18a10,10,0,0,1,-10,10h-50a10,10,0,0,1,-10,-10v-18a10,10,0,0,1,10,-10z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.18" android:pathData="M510,340h50a10,10,0,0,1,10,10v18a10,10,0,0,1,-10,10h-50a10,10,0,0,1,-10,-10v-18a10,10,0,0,1,10,-10z"/>
+    </group>
+    <!-- Del -->
+    <group android:pivotX="134" android:pivotY="419" android:rotation="-30">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.2" android:pathData="M105,404h58a10,10,0,0,1,10,10v18a10,10,0,0,1,-10,10h-58a10,10,0,0,1,-10,-10v-18a10,10,0,0,1,10,-10z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.2" android:pathData="M105,400h58a10,10,0,0,1,10,10v18a10,10,0,0,1,-10,10h-58a10,10,0,0,1,-10,-10v-18a10,10,0,0,1,10,-10z"/>
+    </group>
+    <!-- W -->
+    <group android:pivotX="308" android:pivotY="117" android:rotation="8">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.16" android:pathData="M289,104h38a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-38a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.16" android:pathData="M289,100h38a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-38a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+    </group>
+    <!-- A -->
+    <group android:pivotX="218" android:pivotY="527" android:rotation="-14">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.16" android:pathData="M199,514h38a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-38a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.16" android:pathData="M199,510h38a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-38a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+    </group>
+    <!-- End -->
+    <group android:pivotX="441" android:pivotY="537" android:rotation="12">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.14" android:pathData="M419,524h44a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-44a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.14" android:pathData="M419,520h44a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-44a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+    </group>
+    <!-- Q -->
+    <group android:pivotX="124" android:pivotY="227" android:rotation="15">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.12" android:pathData="M104,214h40a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-40a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.12" android:pathData="M104,210h40a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-40a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+    </group>
+    <!-- Z -->
+    <group android:pivotX="537" android:pivotY="467" android:rotation="-26">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.13" android:pathData="M519,454h37a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-37a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.13" android:pathData="M519,450h37a9,9,0,0,1,9,9v16a9,9,0,0,1,-9,9h-37a9,9,0,0,1,-9,-9v-16a9,9,0,0,1,9,-9z"/>
+    </group>
+    <!-- S -->
+    <group android:pivotX="330" android:pivotY="551" android:rotation="20">
+        <path android:fillColor="#c4bfb5" android:fillAlpha="0.1" android:pathData="M314,539h32a9,9,0,0,1,9,9v14a9,9,0,0,1,-9,9h-32a9,9,0,0,1,-9,-9v-14a9,9,0,0,1,9,-9z"/>
+        <path android:fillColor="#dad5cb" android:fillAlpha="0.1" android:pathData="M314,535h32a9,9,0,0,1,9,9v14a9,9,0,0,1,-9,9h-32a9,9,0,0,1,-9,-9v-14a9,9,0,0,1,9,-9z"/>
+    </group>
 
-    <!-- Divider line between trackpad and click zone -->
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M32,72 L76,72"
-        android:strokeWidth="0.8"
-        android:strokeColor="#C0C0D0" />
+    <!-- Main 4 keys -->
+    <!-- Shift -->
+    <group android:pivotX="200" android:pivotY="195" android:rotation="-7">
+        <path android:fillColor="#b5afa3" android:pathData="M154,174h92a14,14,0,0,1,14,14v28a14,14,0,0,1,-14,14h-92a14,14,0,0,1,-14,-14v-28a14,14,0,0,1,14,-14z"/>
+        <path android:fillColor="#d6d0c6" android:pathData="M154,168h92a14,14,0,0,1,14,14v28a14,14,0,0,1,-14,14h-92a14,14,0,0,1,-14,-14v-28a14,14,0,0,1,14,-14z"/>
+        <path android:fillColor="#00000000" android:pathData="M155,171h90a11,11,0,0,1,11,11v24a11,11,0,0,1,-11,11h-90a11,11,0,0,1,-11,-11v-24a11,11,0,0,1,11,-11z" android:strokeWidth="0.8" android:strokeColor="#e8e3db" android:strokeAlpha="0.5"/>
+    </group>
+    <!-- Enter -->
+    <group android:pivotX="475" android:pivotY="188" android:rotation="10">
+        <path android:fillColor="#b5afa3" android:pathData="M429,166h92a14,14,0,0,1,14,14v28a14,14,0,0,1,-14,14h-92a14,14,0,0,1,-14,-14v-28a14,14,0,0,1,14,-14z"/>
+        <path android:fillColor="#d6d0c6" android:pathData="M429,160h92a14,14,0,0,1,14,14v28a14,14,0,0,1,-14,14h-92a14,14,0,0,1,-14,-14v-28a14,14,0,0,1,14,-14z"/>
+        <path android:fillColor="#00000000" android:pathData="M430,163h90a11,11,0,0,1,11,11v24a11,11,0,0,1,-11,11h-90a11,11,0,0,1,-11,-11v-24a11,11,0,0,1,11,-11z" android:strokeWidth="0.8" android:strokeColor="#e8e3db" android:strokeAlpha="0.5"/>
+    </group>
+    <!-- Ctrl -->
+    <group android:pivotX="200" android:pivotY="480" android:rotation="6">
+        <path android:fillColor="#b5afa3" android:pathData="M154,458h92a14,14,0,0,1,14,14v28a14,14,0,0,1,-14,14h-92a14,14,0,0,1,-14,-14v-28a14,14,0,0,1,14,-14z"/>
+        <path android:fillColor="#d6d0c6" android:pathData="M154,452h92a14,14,0,0,1,14,14v28a14,14,0,0,1,-14,14h-92a14,14,0,0,1,-14,-14v-28a14,14,0,0,1,14,-14z"/>
+        <path android:fillColor="#00000000" android:pathData="M155,455h90a11,11,0,0,1,11,11v24a11,11,0,0,1,-11,11h-90a11,11,0,0,1,-11,-11v-24a11,11,0,0,1,11,-11z" android:strokeWidth="0.8" android:strokeColor="#e8e3db" android:strokeAlpha="0.5"/>
+    </group>
+    <!-- Alt -->
+    <group android:pivotX="475" android:pivotY="475" android:rotation="-9">
+        <path android:fillColor="#b5afa3" android:pathData="M429,453h92a14,14,0,0,1,14,14v28a14,14,0,0,1,-14,14h-92a14,14,0,0,1,-14,-14v-28a14,14,0,0,1,14,-14z"/>
+        <path android:fillColor="#d6d0c6" android:pathData="M429,447h92a14,14,0,0,1,14,14v28a14,14,0,0,1,-14,14h-92a14,14,0,0,1,-14,-14v-28a14,14,0,0,1,14,-14z"/>
+        <path android:fillColor="#00000000" android:pathData="M430,450h90a11,11,0,0,1,11,11v24a11,11,0,0,1,-11,11h-90a11,11,0,0,1,-11,-11v-24a11,11,0,0,1,11,-11z" android:strokeWidth="0.8" android:strokeColor="#e8e3db" android:strokeAlpha="0.5"/>
+    </group>
 
-    <!-- Cursor arrow — positioned on the trackpad surface, slightly right of center -->
-    <path
-        android:fillColor="#2B2D6E"
-        android:pathData="M52,42 L52,62 L56.5,57.5 L61,66 L64,64.5 L59.5,56 L65,55 Z" />
+    <!-- Touchpad -->
+    <path android:fillColor="#b5afa3" android:pathData="M217,261h246a22,22,0,0,1,22,22v131a22,22,0,0,1,-22,22h-246a22,22,0,0,1,-22,-22v-131a22,22,0,0,1,22,-22z"/>
+    <path android:fillColor="#cdc7bd" android:pathData="M217,255h246a22,22,0,0,1,22,22v131a22,22,0,0,1,-22,22h-246a22,22,0,0,1,-22,-22v-131a22,22,0,0,1,22,-22z"/>
+    <path android:fillColor="#ccc6bb" android:fillAlpha="0.55" android:pathData="M223,267h234a15,15,0,0,1,15,15v120a15,15,0,0,1,-15,15h-234a15,15,0,0,1,-15,-15v-120a15,15,0,0,1,15,-15z" android:strokeWidth="0.8" android:strokeColor="#b0a99d" android:strokeAlpha="0.55"/>
+    <path android:fillColor="#00000000" android:pathData="M235,398L445,398" android:strokeWidth="2" android:strokeColor="#a9a296" android:strokeLineCap="round"/>
+
+    <!-- Cursor -->
+    <group android:translateX="315" android:translateY="335">
+        <path android:fillColor="#484340" android:pathData="M-24,-45 L-24,30 L-8,14 L10,45 L26,36 L8,6 L28,-2 Z" android:strokeWidth="1" android:strokeColor="#484340" android:strokeLineJoin="round"/>
+    </group>
 
 </vector>
