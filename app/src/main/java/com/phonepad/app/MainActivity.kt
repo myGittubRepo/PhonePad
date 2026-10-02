@@ -3,6 +3,7 @@ package com.phonepad.app
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHidDevice
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
@@ -469,6 +470,7 @@ class MainActivity : ComponentActivity() {
 
     // Phase 1 UI navigation
     private var currentScreen by mutableStateOf(AppScreen.SPLASH)
+    private var pendingModeAfterConnect: AppScreen? = null
 
     // Keyboard report engine (Milestone 1.1)
     private val keyboardEngine = KeyboardReportSender { modifier, keys ->
@@ -710,7 +712,14 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "Bluetooth permissions granted")
             permissionStatus = "Granted"
             ensureHidSession()
-            currentScreen = AppScreen.HOME
+            if (connectedDevice != null) {
+                currentScreen = AppScreen.HOME
+            } else if (hasBondedComputer()) {
+                prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
+                currentScreen = AppScreen.HOME
+            } else {
+                currentScreen = AppScreen.CONNECT
+            }
         } else {
             Log.w(TAG, "Bluetooth permissions denied: $results")
             permissionStatus = "Denied"
@@ -939,7 +948,17 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(innerPadding)
                             )
                             AppScreen.SHOWCASE -> ShowcaseScreen(
-                                onFinish = { currentScreen = AppScreen.CONNECT },
+                                onFinish = {
+                                    if (!hasBluetoothPermissions()) {
+                                        currentScreen = AppScreen.PERMISSION
+                                    } else if (hasBondedComputer()) {
+                                        prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
+                                        ensureHidSession()
+                                        currentScreen = AppScreen.HOME
+                                    } else {
+                                        currentScreen = AppScreen.CONNECT
+                                    }
+                                },
                                 modifier = Modifier.padding(innerPadding)
                             )
                             AppScreen.CONNECT -> ConnectScreen(
@@ -947,6 +966,12 @@ class MainActivity : ComponentActivity() {
                                 onConnected = {
                                     prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
                                     currentScreen = AppScreen.HOME
+                                },
+                                onRetryConnection = {
+                                    if (hasBluetoothPermissions()) {
+                                        autoReconnectAttempted = false
+                                        ensureHidSession()
+                                    }
                                 },
                                 onSetupLater = {
                                     prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
@@ -963,8 +988,25 @@ class MainActivity : ComponentActivity() {
                             )
                             AppScreen.HOME -> HomeScreen(
                                 isBluetoothConnected = connectedDevice != null,
+                                hasBondedComputer = hasBondedComputer(),
+                                onRetryConnection = {
+                                    if (hasBluetoothPermissions()) {
+                                        autoReconnectAttempted = false
+                                        ensureHidSession()
+                                    }
+                                },
                                 onModeSelected = { mode ->
-                                    if (!hasBluetoothPermissions()) {
+                                    if (mode == AppScreen.CONNECT) {
+                                        if (!hasBluetoothPermissions()) {
+                                            currentScreen = AppScreen.PERMISSION
+                                        } else {
+                                            ensureHidSession()
+                                            val bonded = bluetoothAdapter?.bondedDevices ?: emptySet()
+                                            if (bonded.isEmpty()) {
+                                                currentScreen = AppScreen.CONNECT
+                                            }
+                                        }
+                                    } else if (!hasBluetoothPermissions()) {
                                         currentScreen = AppScreen.PERMISSION
                                     } else {
                                         ensureHidSession()
@@ -1313,6 +1355,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun hasBondedComputer(): Boolean {
+        if (!hasBluetoothPermissions()) return false
+        val bonded = bluetoothAdapter?.bondedDevices ?: return false
+        return bonded.any { device ->
+            val major = device.bluetoothClass?.majorDeviceClass
+            major == BluetoothClass.Device.Major.COMPUTER
+        }
+    }
+
     private fun hasBluetoothPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
@@ -1586,25 +1638,28 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        val lastAddress = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
-        if (lastAddress == null) {
-            Log.d(TAG, "Auto-reconnect: no last host stored, skipping")
-            return
-        }
-
         val adapter = bluetoothAdapter ?: return
         val hid = hidDevice ?: return
-
         val bonded = adapter.bondedDevices ?: emptySet()
-        val target = bonded.find { it.address == lastAddress }
+
+        val lastAddress = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
+        val target = if (lastAddress != null) {
+            bonded.find { it.address == lastAddress } ?: run {
+                Log.d(TAG, "Auto-reconnect: last host $lastAddress not in bonded devices")
+                bonded.firstOrNull { it.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.COMPUTER }
+            }
+        } else {
+            Log.d(TAG, "Auto-reconnect: no last host stored, trying first bonded computer")
+            bonded.firstOrNull { it.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.COMPUTER }
+        }
 
         if (target == null) {
-            Log.d(TAG, "Auto-reconnect: last host $lastAddress not in bonded devices, skipping")
+            Log.d(TAG, "Auto-reconnect: no bonded computers available, skipping")
             return
         }
 
         autoReconnectAttempted = true
-        Log.d(TAG, "Auto-reconnect: attempting to connect to ${target.name} [$lastAddress]")
+        Log.d(TAG, "Auto-reconnect: attempting to connect to ${target.name} [${target.address}]")
         connectionStatus = "CONNECTING"
         val requested = hid.connect(target)
         Log.d(TAG, "Auto-reconnect: connect() returned $requested")
@@ -1645,8 +1700,15 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (!prefs.getBoolean(PREF_HAS_SEEN_ONBOARDING, false)) {
-            Log.d(TAG, "routeFromSplash: first launch — SHOWCASE")
-            currentScreen = AppScreen.SHOWCASE
+            if (hasBluetoothPermissions() && hasBondedComputer()) {
+                Log.d(TAG, "routeFromSplash: first launch but bonded computer found — skip to HOME")
+                prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
+                ensureHidSession()
+                currentScreen = AppScreen.HOME
+            } else {
+                Log.d(TAG, "routeFromSplash: first launch — SHOWCASE")
+                currentScreen = AppScreen.SHOWCASE
+            }
             return
         }
         if (hasBluetoothPermissions()) {
@@ -3367,6 +3429,7 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
 fun ConnectScreen(
     isBluetoothConnected: Boolean = false,
     onConnected: () -> Unit = {},
+    onRetryConnection: () -> Unit = {},
     onSetupLater: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3374,6 +3437,15 @@ fun ConnectScreen(
         if (isBluetoothConnected) {
             delay(800L)
             onConnected()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(3000L)
+            if (!isBluetoothConnected) {
+                onRetryConnection()
+            }
         }
     }
 
@@ -3904,6 +3976,8 @@ fun CompatFailScreen(deviceModel: String, modifier: Modifier = Modifier) {
 @Composable
 fun HomeScreen(
     isBluetoothConnected: Boolean,
+    hasBondedComputer: Boolean = false,
+    onRetryConnection: () -> Unit = {},
     onModeSelected: (AppScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3924,6 +3998,7 @@ fun HomeScreen(
 
     var showBtDialog by remember { mutableStateOf(false) }
     var pendingMode by remember { mutableStateOf<AppScreen?>(null) }
+    var showConnecting by remember { mutableStateOf(false) }
 
     val easeOut = CubicBezierEasing(0.2f, 1f, 0.3f, 1f)
 
@@ -3986,12 +4061,39 @@ fun HomeScreen(
         }
     }
 
+    LaunchedEffect(isBluetoothConnected) {
+        if (isBluetoothConnected) {
+            showConnecting = false
+            showBtDialog = false
+            if (pendingMode != null) {
+                val mode = pendingMode!!
+                pendingMode = null
+                delay(300L)
+                onModeSelected(mode)
+            }
+        }
+    }
+
+    LaunchedEffect(isBluetoothConnected) {
+        if (!isBluetoothConnected) {
+            while (true) {
+                delay(1500L)
+                onRetryConnection()
+            }
+        }
+    }
+
     fun handleModeTap(mode: AppScreen) {
         if (isBluetoothConnected) {
             onModeSelected(mode)
         } else {
             pendingMode = mode
-            showBtDialog = true
+            if (hasBondedComputer) {
+                showConnecting = true
+                onRetryConnection()
+            } else {
+                showBtDialog = true
+            }
         }
     }
 
@@ -4537,6 +4639,43 @@ fun HomeScreen(
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.clickable { showBtDialog = false }
                         .padding(vertical = 6.dp)
+                )
+            }
+        }
+    }
+
+    if (showConnecting) {
+        Box(
+            modifier = Modifier.fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.72f)
+                    .background(winBg, RoundedCornerShape(20.dp))
+                    .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(36.dp),
+                    color = accent,
+                    strokeWidth = 3.dp
+                )
+
+                Spacer(Modifier.height(18.dp))
+
+                Text(
+                    "Connecting…", color = ink, fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    "Establishing connection with your computer",
+                    color = mute, fontSize = 12.sp,
+                    textAlign = TextAlign.Center
                 )
             }
         }
