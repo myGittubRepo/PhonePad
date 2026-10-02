@@ -9,11 +9,17 @@ import android.bluetooth.BluetoothHidDeviceAppSdpSettings
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.res.Configuration
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.os.IBinder
+import android.os.PowerManager
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -751,6 +757,7 @@ class MainActivity : ComponentActivity() {
                         saveLastHost(device.address)
                         loadHostSettings(device.address)
                     }
+                    startForegroundService(Intent(this@MainActivity, HidForegroundService::class.java))
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     cleanupDragState()
@@ -759,6 +766,7 @@ class MainActivity : ComponentActivity() {
                     resetWheelMultiplier()
                     val wasConnected = connectedDevice != null
                     connectedDevice = null
+                    try { stopService(Intent(this@MainActivity, HidForegroundService::class.java)) } catch (_: Exception) {}
                     if (wasConnected && (currentScreen == AppScreen.TRACKPAD || currentScreen == AppScreen.SPLIT)) {
                         disconnectAutoReconnectFailed = false
                         autoReconnectAttempted = false
@@ -886,6 +894,8 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "Last host restored: $lastHost")
         }
 
+        requestBatteryOptimizationExemption()
+
         val bluetoothManager = getSystemService(BluetoothManager::class.java)
         bluetoothAdapter = bluetoothManager?.adapter
 
@@ -933,6 +943,11 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(innerPadding)
                             )
                             AppScreen.CONNECT -> ConnectScreen(
+                                isBluetoothConnected = connectedDevice != null,
+                                onConnected = {
+                                    prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
+                                    currentScreen = AppScreen.HOME
+                                },
                                 onSetupLater = {
                                     prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
                                     if (hasBluetoothPermissions()) {
@@ -1229,6 +1244,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy: cleaning up")
+        try { stopService(Intent(this, HidForegroundService::class.java)) } catch (_: Exception) {}
         unregisterBluetoothReceiver()
         handler.removeCallbacks(dragTriggerRunnable)
         handler.removeCallbacks(disconnectTimerRunnable)
@@ -1283,6 +1299,17 @@ class MainActivity : ComponentActivity() {
         if (connectedDevice == null) {
             Log.d(TAG, "ensureHidSession: registered but disconnected — attempting reconnect")
             attemptAutoReconnect()
+        }
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun requestBatteryOptimizationExemption() {
+        val pm = getSystemService(PowerManager::class.java)
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            val intent = Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            try { startActivity(intent) } catch (_: Exception) {}
         }
     }
 
@@ -3337,7 +3364,19 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ConnectScreen(onSetupLater: () -> Unit, modifier: Modifier = Modifier) {
+fun ConnectScreen(
+    isBluetoothConnected: Boolean = false,
+    onConnected: () -> Unit = {},
+    onSetupLater: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LaunchedEffect(isBluetoothConnected) {
+        if (isBluetoothConnected) {
+            delay(800L)
+            onConnected()
+        }
+    }
+
     val bg = Color(0xFFece6dc)
     val ink = Color(0xFF2e2a24)
     val mute = Color(0xFF7d756a)
@@ -7732,5 +7771,34 @@ fun ShortcutsOverlay(
                 }
             }
         }
+    }
+}
+
+class HidForegroundService : Service() {
+    companion object {
+        const val CHANNEL_ID = "hid_service_channel"
+        const val NOTIFICATION_ID = 1
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        val channel = NotificationChannel(
+            CHANNEL_ID, "Bluetooth HID",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Keeps Bluetooth connection alive" }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("Mouskey")
+            .setContentText("Connected as keyboard & trackpad")
+            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setOngoing(true)
+            .build()
+        startForeground(NOTIFICATION_ID, notification)
+        return START_STICKY
     }
 }
