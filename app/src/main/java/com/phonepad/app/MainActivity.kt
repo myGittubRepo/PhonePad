@@ -428,7 +428,7 @@ class MainActivity : ComponentActivity() {
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var hidDevice: BluetoothHidDevice? = null
-    private var connectedDevice: BluetoothDevice? = null
+    private var connectedDevice by mutableStateOf<BluetoothDevice?>(null)
 
     // Milestone 2 touch tracking
     private var previousX = 0f
