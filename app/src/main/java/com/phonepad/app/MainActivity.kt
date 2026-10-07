@@ -903,8 +903,6 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "Last host restored: $lastHost")
         }
 
-        requestBatteryOptimizationExemption()
-
         val bluetoothManager = getSystemService(BluetoothManager::class.java)
         bluetoothAdapter = bluetoothManager?.adapter
 
@@ -949,6 +947,7 @@ class MainActivity : ComponentActivity() {
                             )
                             AppScreen.SHOWCASE -> ShowcaseScreen(
                                 onFinish = {
+                                    requestBatteryOptimizationExemption()
                                     if (!hasBluetoothPermissions()) {
                                         currentScreen = AppScreen.PERMISSION
                                     } else if (hasBondedComputer()) {
@@ -2983,14 +2982,20 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
 
     var mode by remember { mutableStateOf(0) }
     var cyclesDone by remember { mutableStateOf(0) }
-    val modeDurs = remember { longArrayOf(4000, 4500, 4500) }
+    var finished by remember { mutableStateOf(false) }
+    var restartKey by remember { mutableStateOf(0) }
+    val modeDur = 2500L
 
-    LaunchedEffect(mode) {
-        val first = mode == 0 && cyclesDone == 0
-        delay(if (first) 1800L else modeDurs[mode])
+    LaunchedEffect(mode, finished) {
+        if (finished) return@LaunchedEffect
+        delay(modeDur)
         val next = (mode + 1) % 3
-        if (next == 0) cyclesDone++
-        mode = next
+        if (next == 0) {
+            cyclesDone++
+            finished = true
+        } else {
+            mode = next
+        }
     }
 
     val surfBot by animateFloatAsState(when (mode) { 0 -> 0.022f; 1 -> 0.6f; else -> 0.38f }, tween(850, easing = morphEasing))
@@ -3010,16 +3015,16 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
     val ripScale = remember { Animatable(0f) }
     val ripAlpha = remember { Animatable(0f) }
 
-    LaunchedEffect(Unit) {
-        val wps = floatArrayOf(0.45f,0.35f,0f, 0.72f,0.2f,700f, 0.6f,0.55f,1500f, 0.25f,0.4f,2100f, 0.55f,0.65f,2700f, 0.45f,0.35f,3400f)
+    LaunchedEffect(restartKey) {
+        val wps = floatArrayOf(0.45f,0.35f,0f, 0.72f,0.2f,440f, 0.6f,0.55f,940f, 0.25f,0.4f,1310f, 0.55f,0.65f,1690f, 0.45f,0.35f,2130f)
         val n = wps.size / 3
         var start = 0L
-        while (true) {
+        while (!finished) {
             withInfiniteAnimationFrameMillis { ms ->
                 if (start == 0L) start = ms
                 when (mode) {
                     0 -> {
-                        val el = (ms - start) % 4000
+                        val el = (ms - start) % 2500
                         var si = 0
                         for (i in 0 until n - 1) { if (el >= wps[i*3+2].toLong() && el < wps[(i+1)*3+2].toLong()) { si = i; break } }
                         if (el >= wps[(n-1)*3+2].toLong()) si = n - 2
@@ -3028,7 +3033,7 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
                         val p = ((el - at.toLong()).toFloat() / (bt - at)).coerceIn(0f, 1f)
                         val e = if (p < 0.5f) 2*p*p else 1 - (-2*p+2).pow(2)/2
                         curX = ax + (bx - ax) * e; curY = ay + (by - ay) * e
-                        if (el in 2700..2740 && !showRipple) {
+                        if (el in 1690..1730 && !showRipple) {
                             showRipple = true; ripX = curX; ripY = curY
                             launch {
                                 ripScale.snapTo(0f); ripAlpha.snapTo(0.5f)
@@ -3037,12 +3042,13 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
                                 delay(500); showRipple = false
                             }
                         }
-                        if (el < 2700) showRipple = false
+                        if (el < 1690) showRipple = false
                     }
                     2 -> {
-                        val t = ms * 0.001f
-                        curX = 0.5f + sin(t * 0.7f) * 0.28f
-                        curY = 0.18f + cos(t * 0.5f) * 0.12f
+                        val el = (ms - start) % 2500
+                        val frac = el / 2500f
+                        curX = 0.5f + sin(frac * 2f * 3.14159f) * 0.28f
+                        curY = 0.18f + cos(frac * 1.4f * 3.14159f) * 0.12f
                     }
                 }
             }
@@ -3053,20 +3059,20 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
     var litKey by remember { mutableStateOf("") }
     LaunchedEffect(mode) {
         if (mode == 1) {
+            typedText = ""; litKey = ""
             val word = "mouskey"
-            while (true) {
-                typedText = ""; litKey = ""
-                for (ch in word) { litKey = ch.uppercase(); typedText += ch; delay(280) }
-                litKey = ""; delay(280 * 6)
-            }
+            for (ch in word) { litKey = ch.uppercase(); typedText += ch; delay(280) }
+            litKey = ""
+            delay(Long.MAX_VALUE)
         } else { typedText = ""; litKey = "" }
     }
 
     var flashKey by remember { mutableStateOf("") }
-    LaunchedEffect(mode) {
+    LaunchedEffect(mode, finished) {
+        if (finished) { flashKey = ""; return@LaunchedEffect }
         if (mode == 2) {
             val chars = "QWERTYUIOPASDFGHJKLZXCVBNM"
-            while (true) {
+            while (!finished) {
                 delay(80)
                 if (kotlin.random.Random.nextFloat() < 0.1f) {
                     flashKey = chars[kotlin.random.Random.nextInt(chars.length)].toString()
@@ -3079,7 +3085,7 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
     val progFrac = remember { Animatable(0f) }
     LaunchedEffect(mode) {
         progFrac.snapTo(0f)
-        progFrac.animateTo(1f, tween(modeDurs[mode].toInt(), easing = LinearEasing))
+        progFrac.animateTo(1f, tween(modeDur.toInt(), easing = LinearEasing))
     }
 
     val modeLabel by remember(mode) { mutableStateOf(arrayOf("Trackpad", "Keyboard", "Split Mode")[mode]) }
@@ -3138,7 +3144,6 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
 
     Box(
         modifier = modifier.fillMaxSize().background(bg)
-            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onFinish() }
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val spacing = 28.dp.toPx(); val dotR = 0.6.dp.toPx()
@@ -3409,14 +3414,194 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
 
             Spacer(Modifier.height(14.dp))
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.graphicsLayer { alpha = progBarAlpha.value }
-            ) {
-                for (i in 0 until 3) {
-                    Box(modifier = Modifier.width(30.dp).height(3.dp).background(Color(0x1F808080), RoundedCornerShape(2.dp))) {
-                        if (i == mode) {
-                            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(progFrac.value).background(accent, RoundedCornerShape(2.dp)))
+            if (!finished) {
+                // Walking character progress bar
+                val totalW = 228.dp
+                val segGap = 4.dp
+                val barH = 3.dp
+                val segW = (totalW - segGap * 2) / 3
+
+                val overallFrac = (mode.toFloat() + progFrac.value) / 3f
+                val chrHopTrigger = mode
+
+                var doHop by remember { mutableStateOf(false) }
+                LaunchedEffect(chrHopTrigger) {
+                    if (mode > 0 || cyclesDone > 0) {
+                        doHop = true
+                        delay(550)
+                        doHop = false
+                    }
+                }
+
+                Box(
+                    modifier = Modifier.width(totalW).height(24.dp)
+                        .graphicsLayer { alpha = progBarAlpha.value },
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    // Track segments
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(segGap),
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    ) {
+                        for (i in 0 until 3) {
+                            Box(modifier = Modifier.width(segW).height(barH).background(Color(0x29808080), RoundedCornerShape(2.dp))) {
+                                val fill = when {
+                                    i < mode -> 1f
+                                    i == mode -> progFrac.value
+                                    else -> 0f
+                                }
+                                if (fill > 0f) {
+                                    Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(fill).background(accent, RoundedCornerShape(2.dp)))
+                                }
+                            }
+                        }
+                    }
+
+                    // Walking character
+                    val chrSize = 18.dp
+                    val walkTime = remember { Animatable(0f) }
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            walkTime.snapTo(0f)
+                            walkTime.animateTo(1f, tween(280, easing = LinearEasing))
+                        }
+                    }
+                    val bobTime = remember { Animatable(0f) }
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            bobTime.snapTo(0f)
+                            bobTime.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
+                        }
+                    }
+                    val blinkTime = remember { Animatable(0f) }
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            blinkTime.snapTo(0f)
+                            blinkTime.animateTo(1f, tween(3400, easing = LinearEasing))
+                        }
+                    }
+
+                    val hopBounce by animateFloatAsState(
+                        targetValue = if (doHop) 1f else 0f,
+                        animationSpec = tween(if (doHop) 275 else 275)
+                    )
+
+                    Canvas(
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        val totalPx = totalW.toPx()
+                        val chrW = chrSize.toPx()
+                        val barHPx = barH.toPx()
+                        val chrX = overallFrac * totalPx
+                        val baseY = size.height - barHPx
+
+                        val hopY = -sin(hopBounce * 3.14159f) * 10f
+                        val bobY = -sin(bobTime.value * 2f * 3.14159f) * 1.2f
+                        val cy = baseY + hopY + bobY
+
+                        // Body (keycap shape)
+                        val bodyW = 16f
+                        val bodyH = 12f
+                        val bodyL = chrX - bodyW / 2f
+                        val bodyT = cy - 17f
+
+                        // Body shadow
+                        drawRoundRect(
+                            color = keySide,
+                            topLeft = Offset(bodyL, bodyT + 2f),
+                            size = Size(bodyW, bodyH),
+                            cornerRadius = CornerRadius(4f, 4f)
+                        )
+                        // Body face
+                        drawRoundRect(
+                            color = keyFace,
+                            topLeft = Offset(bodyL, bodyT),
+                            size = Size(bodyW, bodyH),
+                            cornerRadius = CornerRadius(4f, 4f)
+                        )
+
+                        // Eyes
+                        val eyeW = 2.4f; val eyeH = 3.2f
+                        val blinkScale = if (blinkTime.value in 0.92f..0.95f) 0.1f else 1f
+                        val eyeT = bodyT + 4f
+                        val actualEyeH = eyeH * blinkScale
+                        val eyeOffset = (eyeH - actualEyeH) / 2f
+
+                        drawOval(ink, Offset(bodyL + 5f, eyeT + eyeOffset), Size(eyeW, actualEyeH))
+                        drawOval(ink, Offset(bodyL + 9.5f, eyeT + eyeOffset), Size(eyeW, actualEyeH))
+
+                        // Cheek
+                        drawOval(accent.copy(alpha = 0.35f), Offset(bodyL + 11f, bodyT + 8f), Size(3f, 1.5f))
+
+                        // Legs
+                        val legT = bodyT + bodyH + 1f
+                        val legAngle1 = sin(walkTime.value * 2f * 3.14159f) * 38f
+                        val legAngle2 = sin((walkTime.value + 0.5f) * 2f * 3.14159f) * 38f
+
+                        val leg1X = bodyL + 4f
+                        val leg2X = bodyL + 10f
+                        val legLen = 4f
+                        val rad1 = legAngle1 * (3.14159f / 180f)
+                        val rad2 = legAngle2 * (3.14159f / 180f)
+
+                        drawLine(ink, Offset(leg1X, legT), Offset(leg1X + sin(rad1) * legLen, legT + cos(rad1) * legLen), strokeWidth = 1.6f, cap = StrokeCap.Round)
+                        drawLine(ink, Offset(leg2X, legT), Offset(leg2X + sin(rad2) * legLen, legT + cos(rad2) * legLen), strokeWidth = 1.6f, cap = StrokeCap.Round)
+                    }
+                }
+            } else {
+                // Finished: show reload and arrow icons — same height as progress bar
+                Row(
+                    modifier = Modifier.width(228.dp).height(24.dp)
+                        .graphicsLayer { alpha = progBarAlpha.value },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Reload icon
+                    Box(
+                        modifier = Modifier.size(24.dp)
+                            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                                finished = false
+                                mode = 0
+                                cyclesDone = 0
+                                restartKey++
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.size(18.dp)) {
+                            val cx = size.width / 2f; val cy = size.height / 2f
+                            val r = size.width / 2f - 1.5f
+                            drawArc(
+                                color = mute, startAngle = -60f, sweepAngle = 280f,
+                                useCenter = false, style = Stroke(1.8f, cap = StrokeCap.Round),
+                                topLeft = Offset(cx - r, cy - r), size = Size(r * 2, r * 2)
+                            )
+                            val arrowTip = Offset(cx + r * cos(-60f * 3.14159f / 180f).toFloat(), cy + r * sin(-60f * 3.14159f / 180f).toFloat())
+                            val path = Path().apply {
+                                moveTo(arrowTip.x - 3f, arrowTip.y - 4f)
+                                lineTo(arrowTip.x, arrowTip.y)
+                                lineTo(arrowTip.x + 4f, arrowTip.y - 3f)
+                            }
+                            drawPath(path, mute, style = Stroke(1.8f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                        }
+                    }
+
+                    // Arrow → icon
+                    Box(
+                        modifier = Modifier.size(24.dp)
+                            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                                onFinish()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.size(18.dp)) {
+                            val cy = size.height / 2f
+                            drawLine(ink, Offset(0f, cy), Offset(size.width, cy), strokeWidth = 1.8f, cap = StrokeCap.Round)
+                            val path = Path().apply {
+                                moveTo(size.width - 6f, cy - 5f)
+                                lineTo(size.width, cy)
+                                lineTo(size.width - 6f, cy + 5f)
+                            }
+                            drawPath(path, ink, style = Stroke(1.8f, cap = StrokeCap.Round, join = StrokeJoin.Round))
                         }
                     }
                 }
@@ -4687,46 +4872,190 @@ fun PermissionScreen(
     onContinue: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    val bg = Color(0xFFece6dc)
+    val ink = Color(0xFF2e2a24)
+    val mute = Color(0xFF7d756a)
+    val accent = Color(0xFF6b5e4f)
+    val surface = Color(0xFFcac3b8)
+    val keyFace = Color(0xFFe8e3da)
+    val keySide = Color(0xFFc4bdb2)
+    val btnText = Color(0xFFf3eee6)
+
+    // Ring pulse animations
+    val ring1Scale = remember { Animatable(1f) }
+    val ring1Alpha = remember { Animatable(0.45f) }
+    val ring2Scale = remember { Animatable(1f) }
+    val ring2Alpha = remember { Animatable(0.45f) }
+    val ring3Scale = remember { Animatable(1f) }
+    val ring3Alpha = remember { Animatable(0.45f) }
+
+    LaunchedEffect(Unit) {
+        launch { while (true) { ring1Scale.snapTo(1f); ring1Alpha.snapTo(0.45f); launch { ring1Scale.animateTo(2.05f, tween(3200, easing = CubicBezierEasing(0.2f, 0.6f, 0.3f, 1f))) }; launch { ring1Alpha.animateTo(0f, tween(3200, easing = CubicBezierEasing(0.2f, 0.6f, 0.3f, 1f))) }; delay(3200) } }
+        launch { delay(1060); while (true) { ring2Scale.snapTo(1f); ring2Alpha.snapTo(0.45f); launch { ring2Scale.animateTo(2.05f, tween(3200, easing = CubicBezierEasing(0.2f, 0.6f, 0.3f, 1f))) }; launch { ring2Alpha.animateTo(0f, tween(3200, easing = CubicBezierEasing(0.2f, 0.6f, 0.3f, 1f))) }; delay(3200) } }
+        launch { delay(2120); while (true) { ring3Scale.snapTo(1f); ring3Alpha.snapTo(0.45f); launch { ring3Scale.animateTo(2.05f, tween(3200, easing = CubicBezierEasing(0.2f, 0.6f, 0.3f, 1f))) }; launch { ring3Alpha.animateTo(0f, tween(3200, easing = CubicBezierEasing(0.2f, 0.6f, 0.3f, 1f))) }; delay(3200) } }
+    }
+
+    // Key drop entrance
+    val keyScale = remember { Animatable(0.85f) }
+    val keyAlpha = remember { Animatable(0f) }
+    val keyY = remember { Animatable(-18f) }
+    LaunchedEffect(Unit) {
+        delay(150)
+        launch { keyAlpha.animateTo(1f, tween(420)) }
+        launch { keyY.animateTo(0f, tween(700, easing = CubicBezierEasing(0.3f, 1.4f, 0.5f, 1f))) }
+        launch { keyScale.animateTo(1f, tween(700, easing = CubicBezierEasing(0.3f, 1.4f, 0.5f, 1f))) }
+    }
+
+    Box(
+        modifier = modifier.fillMaxSize().background(bg)
     ) {
-        Icon(
-            imageVector = Icons.Filled.Bluetooth,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(80.dp)
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        Text(
-            text = "Bluetooth Access",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = "PhonePad needs Bluetooth access to connect to your computer as a trackpad.\n\nWe don't collect any data.",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(40.dp))
-        Button(
-            onClick = onContinue,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 32.dp)
-                .height(52.dp),
-            shape = RoundedCornerShape(12.dp)
+        // Dot pattern background
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val spacing = 22.dp.toPx(); val dotR = 0.6.dp.toPx()
+            for (col in 0..(size.width / spacing).toInt()) {
+                for (row in 0..(size.height / spacing).toInt()) {
+                    drawCircle(mute.copy(alpha = 0.22f), dotR, Offset(col * spacing, row * spacing))
+                }
+            }
+        }
+
+        // Radial fade over dots
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawRect(
+                brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                    colors = listOf(bg, Color.Transparent),
+                    center = Offset(size.width / 2f, size.height * 0.38f),
+                    radius = size.width * 0.7f
+                )
+            )
+        }
+
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text("Continue", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            // Hero: keycap with signal rings
+            Box(
+                modifier = Modifier.size(112.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // Rings
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                        .graphicsLayer { scaleX = ring1Scale.value; scaleY = ring1Scale.value; alpha = ring1Alpha.value }
+                        .border(1.5.dp, accent, RoundedCornerShape(30.dp))
+                )
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                        .graphicsLayer { scaleX = ring2Scale.value; scaleY = ring2Scale.value; alpha = ring2Alpha.value }
+                        .border(1.5.dp, accent, RoundedCornerShape(30.dp))
+                )
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                        .graphicsLayer { scaleX = ring3Scale.value; scaleY = ring3Scale.value; alpha = ring3Alpha.value }
+                        .border(1.5.dp, accent, RoundedCornerShape(30.dp))
+                )
+
+                // Keycap
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                        .graphicsLayer {
+                            alpha = keyAlpha.value
+                            translationY = keyY.value * 3f
+                            scaleX = keyScale.value; scaleY = keyScale.value
+                        }
+                        .shadow(22.dp, RoundedCornerShape(30.dp), ambientColor = Color(0x40000000))
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                listOf(Color(0xFFF0EBE3), keyFace)
+                            ),
+                            shape = RoundedCornerShape(30.dp)
+                        )
+                        .border(1.dp, Color(0x38808080), RoundedCornerShape(30.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // BT icon drawn as Canvas
+                    Canvas(modifier = Modifier.size(46.dp)) {
+                        val w = size.width; val h = size.height
+                        val path = Path().apply {
+                            moveTo(w * 0.27f, h * 0.3125f)
+                            lineTo(w * 0.7083f, h * 0.6875f)
+                            lineTo(w * 0.5f, h * 0.875f)
+                            lineTo(w * 0.5f, h * 0.125f)
+                            lineTo(w * 0.7083f, h * 0.3125f)
+                            lineTo(w * 0.27f, h * 0.6875f)
+                        }
+                        drawPath(path, ink, style = Stroke(width = 1.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(52.dp))
+
+            // Title
+            Text(
+                "Bluetooth access",
+                color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.02f).sp, lineHeight = 26.sp
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            // Description
+            Text(
+                "PhonePad needs Bluetooth to connect to your computer as a trackpad.",
+                color = mute, fontSize = 12.5.sp, fontWeight = FontWeight.Normal,
+                lineHeight = 19.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.78f)
+            )
+
+            Spacer(Modifier.height(24.dp))
+
+            // Privacy badge
+            Box(
+                modifier = Modifier
+                    .background(
+                        surface.copy(alpha = 0.38f),
+                        RoundedCornerShape(999.dp)
+                    )
+                    .border(1.dp, Color(0x33808080), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Lock icon
+                    Canvas(modifier = Modifier.size(15.dp)) {
+                        val w = size.width; val h = size.height
+                        drawRoundRect(accent, Offset(w * 0.1875f, h * 0.4375f), Size(w * 0.625f, h * 0.4375f), CornerRadius(w * 0.125f), style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                        val lockPath = Path().apply {
+                            moveTo(w * 0.325f, h * 0.4375f)
+                            lineTo(w * 0.325f, h * 0.33f)
+                            cubicTo(w * 0.325f, h * 0.02f, w * 0.675f, h * 0.02f, w * 0.675f, h * 0.33f)
+                            lineTo(w * 0.675f, h * 0.4375f)
+                        }
+                        drawPath(lockPath, accent, style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    }
+                    Text("We don't collect any data", color = ink, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Spacer(Modifier.height(48.dp))
+
+            // Keycap-style CTA button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .height(58.dp)
+                    .shadow(5.dp, RoundedCornerShape(18.dp), ambientColor = accent.copy(alpha = 0.3f))
+                    .background(accent, RoundedCornerShape(18.dp))
+                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                        onContinue()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Continue", color = btnText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.005f).sp)
+            }
         }
     }
 }
