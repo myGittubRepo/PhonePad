@@ -929,15 +929,19 @@ class MainActivity : ComponentActivity() {
                     AnimatedContent(
                         targetState = currentScreen,
                         transitionSpec = {
+                            val modeScreens = setOf(AppScreen.TRACKPAD, AppScreen.KEYBOARD, AppScreen.SPLIT)
                             if (initialState == AppScreen.SPLASH) {
                                 (fadeIn(tween(350)) + slideInVertically { -it / 16 }) togetherWith
                                     fadeOut(tween(250))
-                            } else if (targetState == AppScreen.TRACKPAD) {
-                                (fadeIn(tween(180)) + slideInHorizontally { it / 6 }) togetherWith
-                                    (fadeOut(tween(120)) + slideOutHorizontally { -it / 6 })
+                            } else if (initialState in modeScreens && targetState in modeScreens) {
+                                fadeIn(tween(280, easing = FastOutSlowInEasing)) togetherWith
+                                    fadeOut(tween(200, easing = FastOutSlowInEasing))
+                            } else if (targetState in modeScreens) {
+                                (fadeIn(tween(220, easing = FastOutSlowInEasing)) + slideInHorizontally { it / 10 }) togetherWith
+                                    (fadeOut(tween(160)) + slideOutHorizontally { -it / 10 })
                             } else {
-                                (fadeIn(tween(160)) + slideInHorizontally { it / 8 }) togetherWith
-                                    (fadeOut(tween(100)) + slideOutHorizontally { -it / 8 })
+                                (fadeIn(tween(200, easing = FastOutSlowInEasing)) + slideInHorizontally { it / 10 }) togetherWith
+                                    (fadeOut(tween(140)) + slideOutHorizontally { -it / 10 })
                             }
                         },
                         label = "screen"
@@ -1035,10 +1039,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 Box(modifier = Modifier.fillMaxSize()) {
-                                    // Cross-fade between modes
                                     Crossfade(
                                         targetState = currentScreen,
-                                        animationSpec = tween(200),
+                                        animationSpec = tween(320, easing = FastOutSlowInEasing),
                                         label = "mode-crossfade"
                                     ) { screen ->
                                         when (screen) {
@@ -1165,8 +1168,8 @@ class MainActivity : ComponentActivity() {
                                         // Scrim / dismiss overlay (dark backdrop in keyboard mode)
                                         AnimatedVisibility(
                                             visible = showModePopup,
-                                            enter = fadeIn(tween(100)),
-                                            exit = fadeOut(tween(80))
+                                            enter = fadeIn(tween(200, easing = FastOutSlowInEasing)),
+                                            exit = fadeOut(tween(160))
                                         ) {
                                             Box(
                                                 modifier = Modifier
@@ -8112,12 +8115,12 @@ fun ModePopup(
         val expandFrom = if (dropDown) Alignment.CenterHorizontally else Alignment.End
         AnimatedVisibility(
             visible = isVisible,
-            enter = fadeIn(tween(80)) + expandHorizontally(
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 1200f),
+            enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) + expandHorizontally(
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = 600f),
                 expandFrom = expandFrom
             ),
-            exit = fadeOut(tween(80)) + shrinkHorizontally(
-                animationSpec = tween(120, easing = FastOutSlowInEasing),
+            exit = fadeOut(tween(140, easing = FastOutSlowInEasing)) + shrinkHorizontally(
+                animationSpec = tween(180, easing = FastOutSlowInEasing),
                 shrinkTowards = expandFrom
             )
         ) {
@@ -8135,7 +8138,7 @@ fun ModePopup(
                     val isActive = mode == currentMode
                     val pillBg by animateColorAsState(
                         if (isActive) accent else Color.Transparent,
-                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 1500f), label = "pill"
+                        animationSpec = tween(260, easing = FastOutSlowInEasing), label = "pill"
                     )
                     Row(
                         modifier = Modifier
@@ -8154,8 +8157,14 @@ fun ModePopup(
                         ModeIcon(mode, isActive)
                         AnimatedVisibility(
                             visible = isActive,
-                            enter = fadeIn(tween(100)) + expandHorizontally(tween(100), expandFrom = Alignment.Start),
-                            exit = fadeOut(tween(60)) + shrinkHorizontally(tween(80), shrinkTowards = Alignment.Start)
+                            enter = fadeIn(tween(200, easing = FastOutSlowInEasing)) + expandHorizontally(
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 500f),
+                                expandFrom = Alignment.Start
+                            ),
+                            exit = fadeOut(tween(120)) + shrinkHorizontally(
+                                animationSpec = tween(150, easing = FastOutSlowInEasing),
+                                shrinkTowards = Alignment.Start
+                            )
                         ) {
                             Text(
                                 text = label,
@@ -8175,8 +8184,11 @@ fun ModePopup(
     fun TriggerButton() {
         AnimatedVisibility(
             visible = !isVisible,
-            enter = fadeIn(tween(100)) + scaleIn(tween(100), initialScale = 0.8f),
-            exit = fadeOut(tween(60)) + scaleOut(tween(60), targetScale = 0.8f)
+            enter = fadeIn(tween(200, easing = FastOutSlowInEasing)) + scaleIn(
+                animationSpec = spring(dampingRatio = 0.75f, stiffness = 600f),
+                initialScale = 0.85f
+            ),
+            exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.85f)
         ) {
             Box(
                 modifier = Modifier
