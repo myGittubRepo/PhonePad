@@ -711,6 +711,7 @@ class MainActivity : ComponentActivity() {
         if (allGranted) {
             Log.d(TAG, "Bluetooth permissions granted")
             permissionStatus = "Granted"
+            requestBatteryOptimizationExemption()
             ensureHidSession()
             if (connectedDevice != null) {
                 currentScreen = AppScreen.HOME
@@ -947,7 +948,6 @@ class MainActivity : ComponentActivity() {
                             )
                             AppScreen.SHOWCASE -> ShowcaseScreen(
                                 onFinish = {
-                                    requestBatteryOptimizationExemption()
                                     if (!hasBluetoothPermissions()) {
                                         currentScreen = AppScreen.PERMISSION
                                     } else if (hasBondedComputer()) {
@@ -962,6 +962,7 @@ class MainActivity : ComponentActivity() {
                             )
                             AppScreen.CONNECT -> ConnectScreen(
                                 isBluetoothConnected = connectedDevice != null,
+                                isBluetoothOn = !isBluetoothOff,
                                 onConnected = {
                                     prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
                                     currentScreen = AppScreen.HOME
@@ -971,6 +972,9 @@ class MainActivity : ComponentActivity() {
                                         autoReconnectAttempted = false
                                         ensureHidSession()
                                     }
+                                },
+                                onToggleBluetooth = {
+                                    if (isBluetoothOff) requestBluetoothEnable() else requestBluetoothDisable()
                                 },
                                 onSetupLater = {
                                     prefs.edit().putBoolean(PREF_HAS_SEEN_ONBOARDING, true).apply()
@@ -1000,10 +1004,7 @@ class MainActivity : ComponentActivity() {
                                             currentScreen = AppScreen.PERMISSION
                                         } else {
                                             ensureHidSession()
-                                            val bonded = bluetoothAdapter?.bondedDevices ?: emptySet()
-                                            if (bonded.isEmpty()) {
-                                                currentScreen = AppScreen.CONNECT
-                                            }
+                                            currentScreen = AppScreen.CONNECT
                                         }
                                     } else if (!hasBluetoothPermissions()) {
                                         currentScreen = AppScreen.PERMISSION
@@ -1690,6 +1691,20 @@ class MainActivity : ComponentActivity() {
             permissionStatus = "Granted (pre-Android 12)"
             ensureHidSession()
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestBluetoothEnable() {
+        val adapter = bluetoothAdapter ?: return
+        if (!adapter.isEnabled) {
+            val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+            startActivity(intent)
+        }
+    }
+
+    private fun requestBluetoothDisable() {
+        val intent = Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
+        startActivity(intent)
     }
 
     private fun routeFromSplash() {
@@ -3613,8 +3628,10 @@ fun ShowcaseScreen(onFinish: () -> Unit, modifier: Modifier = Modifier) {
 @Composable
 fun ConnectScreen(
     isBluetoothConnected: Boolean = false,
+    isBluetoothOn: Boolean = true,
     onConnected: () -> Unit = {},
     onRetryConnection: () -> Unit = {},
+    onToggleBluetooth: () -> Unit = {},
     onSetupLater: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3935,25 +3952,33 @@ fun ConnectScreen(
                     .background(winBg, RoundedCornerShape(14.dp))
                     .border(1.dp, winBorder, RoundedCornerShape(14.dp))
             ) {
-                // Titlebar
+                // Bluetooth status bar
                 Row(
                     modifier = Modifier.fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Window dots
-                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Box(Modifier.size(7.dp).background(mute.copy(alpha = 0.2f), CircleShape))
-                        Box(Modifier.size(7.dp).background(mute.copy(alpha = 0.2f), CircleShape))
-                        Box(Modifier.size(7.dp).background(mute.copy(alpha = 0.2f), CircleShape))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Bluetooth", color = ink, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (isBluetoothOn) "On" else "Off",
+                            color = if (isBluetoothOn) accent else mute,
+                            fontSize = 11.sp, fontWeight = FontWeight.Medium
+                        )
                     }
-                    Text(
-                        "Bluetooth setup", color = mute, fontSize = 10.5.sp,
-                        fontWeight = FontWeight.SemiBold, letterSpacing = 0.02.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(36.dp))
+                    Box(
+                        modifier = Modifier.size(38.dp, 22.dp)
+                            .background(if (isBluetoothOn) accent else mute.copy(alpha = 0.3f), RoundedCornerShape(11.dp))
+                            .clickable { onToggleBluetooth() },
+                        contentAlignment = if (isBluetoothOn) Alignment.CenterEnd else Alignment.CenterStart
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(3.dp).size(16.dp)
+                                .background(winBg, CircleShape)
+                        )
+                    }
                 }
 
                 // Divider
@@ -3961,31 +3986,35 @@ fun ConnectScreen(
 
                 // Body
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp)) {
-                    // Bluetooth toggle row
+                    // Status notice
                     Row(
                         modifier = Modifier.fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Bluetooth", color = ink, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                        // Toggle (static, always on)
-                        Box(
-                            modifier = Modifier.size(38.dp, 22.dp)
-                                .background(accent, RoundedCornerShape(11.dp)),
-                            contentAlignment = Alignment.CenterEnd
-                        ) {
-                            Box(
-                                modifier = Modifier.padding(3.dp).size(16.dp)
-                                    .background(winBg, CircleShape)
+                            .background(
+                                if (isBluetoothOn) Color(0x0Dff8c00) else Color(0x0Dff0000),
+                                RoundedCornerShape(8.dp)
                             )
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Canvas(modifier = Modifier.size(14.dp)) {
+                            val fill = if (isBluetoothOn) Color(0xFFc4956a) else Color(0xFFb07070)
+                            drawCircle(fill, size.minDimension / 2f)
+                            val cx = size.width / 2f
+                            val cy = size.height / 2f
+                            val r = size.minDimension * 0.18f
+                            drawLine(Color.White, Offset(cx, cy - r * 1.6f), Offset(cx, cy + r * 0.3f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                            drawCircle(Color.White, 1.3.dp.toPx(), Offset(cx, cy + r * 1.4f))
                         }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (isBluetoothOn) "No device paired — follow the steps below"
+                            else "Bluetooth is off — turn it on to continue",
+                            color = ink, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            lineHeight = 14.sp
+                        )
                     }
 
-                    // Divider
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(winBorder))
-
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(12.dp))
 
                     // Steps
                     // Step 1
@@ -4277,7 +4306,7 @@ fun HomeScreen(
                 showConnecting = true
                 onRetryConnection()
             } else {
-                showBtDialog = true
+                onModeSelected(AppScreen.CONNECT)
             }
         }
     }
