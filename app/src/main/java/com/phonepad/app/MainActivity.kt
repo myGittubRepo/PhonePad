@@ -348,7 +348,6 @@ class MainActivity : ComponentActivity() {
         private const val PREF_SPLIT_RATIO = "_split_ratio"
         private const val PREF_HAS_SEEN_ONBOARDING = "has_seen_onboarding"
         private const val PREF_GESTURE_GUIDE_SECTIONS = "gesture_guide_sections"
-        private const val PREF_KEYBOARD_LAYOUT = "keyboard_layout"
 
         private const val EDGE_ZONE_DP = 20f
         private const val AUTO_RECONNECT_TIMEOUT_MS = 10_000L
@@ -466,7 +465,6 @@ class MainActivity : ComponentActivity() {
     private var statusBarAutoHide by mutableStateOf(true)
     private var trackpadTheme by mutableStateOf("midnight")
     private var uiTheme by mutableStateOf("dark") // dark, light
-    private var keyboardLayoutName by mutableStateOf("qwerty")
 
     // Phase 1 UI navigation
     private var currentScreen by mutableStateOf(AppScreen.SPLASH)
@@ -897,7 +895,6 @@ class MainActivity : ComponentActivity() {
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
         trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "midnight") ?: "midnight"
         uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
-        keyboardLayoutName = prefs.getString(PREF_KEYBOARD_LAYOUT, "qwerty") ?: "qwerty"
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
         if (lastHost != null) {
@@ -1068,8 +1065,6 @@ class MainActivity : ComponentActivity() {
                                                 onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
                                                 trackpadTheme = trackpadTheme,
                                                 onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
-                                                keyboardLayout = keyboardLayoutName,
-                                                onKeyboardLayoutChange = { keyboardLayoutName = it; saveGlobalSettings() },
                                                 uiTheme = uiTheme,
                                                 onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
                                                 batteryPercent = getBatteryPercent(),
@@ -1117,7 +1112,6 @@ class MainActivity : ComponentActivity() {
                                                 onConsumerRelease = { sendConsumerReport(0) },
                                                 doubleSpaceForPeriod = doubleSpaceForPeriod,
                                                 keySoundEnabled = keySoundEnabled,
-                                                layout = KeyboardLayouts.fullLayoutFromName(keyboardLayoutName),
                                                 theme = AppThemes.fromName(trackpadTheme)
                                             )
                                             AppScreen.SPLIT -> {
@@ -1199,6 +1193,12 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                     onToggle = { showModePopup = !showModePopup },
+                                                    onOpenSettings = {
+                                                        showModePopup = false
+                                                        keyboardEngine.releaseAll()
+                                                        settingsInitialTab = 0
+                                                        showSettings = true
+                                                    },
                                                     showTrigger = false,
                                                     modifier = Modifier
                                                         .align(Alignment.BottomEnd)
@@ -1219,6 +1219,12 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                     onToggle = { showModePopup = !showModePopup },
+                                                    onOpenSettings = {
+                                                        showModePopup = false
+                                                        keyboardEngine.releaseAll()
+                                                        settingsInitialTab = 0
+                                                        showSettings = true
+                                                    },
                                                     dropDown = true,
                                                     modifier = Modifier
                                                         .align(Alignment.TopCenter)
@@ -1239,6 +1245,12 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                     onToggle = { showModePopup = !showModePopup },
+                                                    onOpenSettings = {
+                                                        showModePopup = false
+                                                        keyboardEngine.releaseAll()
+                                                        settingsInitialTab = 0
+                                                        showSettings = true
+                                                    },
                                                     modifier = Modifier
                                                         .align(Alignment.BottomEnd)
                                                         .windowInsetsPadding(WindowInsets.navigationBars)
@@ -1246,6 +1258,82 @@ class MainActivity : ComponentActivity() {
                                                 )
                                             }
                                         }
+                                    }
+
+                                    // Settings overlay (full-screen, available in every mode)
+                                    val connectedHostName = connectedDevice?.let { getDeviceDisplayName(it) }
+                                    AnimatedVisibility(
+                                        visible = showSettings,
+                                        enter = fadeIn(tween(120)),
+                                        exit = fadeOut(tween(100))
+                                    ) {
+                                        // Swallow touches so they never reach the trackpad/keyboard underneath
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null
+                                                ) {}
+                                        ) {
+                                            SettingsOverlay(
+                                                onDismiss = { showSettings = false },
+                                                sensitivity = sensitivityMultiplier,
+                                                onSensitivityChange = { sensitivityMultiplier = it; saveHostSettings() },
+                                                tapToClick = tapToClickEnabled,
+                                                onTapToClickChange = { tapToClickEnabled = it; saveHostSettings() },
+                                                naturalScroll = naturalScrollEnabled,
+                                                onNaturalScrollChange = { naturalScrollEnabled = it; saveHostSettings() },
+                                                rippleEnabled = rippleEnabled,
+                                                onRippleChange = { rippleEnabled = it; saveHostSettings() },
+                                                hapticsEnabled = hapticsEnabled,
+                                                onHapticsChange = { hapticsEnabled = it; saveHostSettings() },
+                                                statusBarAutoHide = statusBarAutoHide,
+                                                onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
+                                                uiTheme = uiTheme,
+                                                onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
+                                                trackpadTheme = trackpadTheme,
+                                                onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
+                                                settingsInitialTab = settingsInitialTab,
+                                                connectedHostName = connectedHostName,
+                                                bondedDevices = bondedDevices,
+                                                isConnected = connectedDevice != null,
+                                                connectedDeviceAddress = connectedDevice?.address,
+                                                deviceNicknames = deviceNicknames,
+                                                onOpenDeviceManager = {
+                                                    showSettings = false
+                                                    showDeviceManager = true
+                                                },
+                                                onNavigateToPairingGuide = {
+                                                    showDeviceManager = false
+                                                    showSettings = false
+                                                    currentScreen = AppScreen.CONNECT
+                                                },
+                                                appVersion = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0" } catch (_: Exception) { "1.0" }
+                                            )
+                                        }
+                                    }
+
+                                    // Device Manager overlay
+                                    AnimatedVisibility(
+                                        visible = showDeviceManager,
+                                        enter = fadeIn(tween(300)),
+                                        exit = fadeOut(tween(300))
+                                    ) {
+                                        DeviceManagerOverlay(
+                                            bondedDevices = bondedDevices,
+                                            connectedDeviceAddress = connectedDevice?.address,
+                                            deviceNicknames = deviceNicknames,
+                                            onRenameDevice = { addr, name -> saveDeviceNickname(addr, name) },
+                                            onForgetDevice = { device -> forgetDevice(device) },
+                                            onDeviceSelected = { device -> connectToDevice(device) },
+                                            onNavigateToPairingGuide = {
+                                                showDeviceManager = false
+                                                showSettings = false
+                                                currentScreen = AppScreen.CONNECT
+                                            },
+                                            onDismiss = { showDeviceManager = false }
+                                        )
                                     }
                                 }
                             }
@@ -1542,7 +1630,6 @@ class MainActivity : ComponentActivity() {
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
         trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "midnight") ?: "midnight"
         uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
-        keyboardLayoutName = prefs.getString(PREF_KEYBOARD_LAYOUT, "qwerty") ?: "qwerty"
         loadDeviceNicknames()
         Log.d(TAG, "Loaded settings for $address: sensitivity=$sensitivityMultiplier, tapToClick=$tapToClickEnabled, naturalScroll=$naturalScrollEnabled, ripple=$rippleEnabled, haptics=$hapticsEnabled")
     }
@@ -1564,7 +1651,6 @@ class MainActivity : ComponentActivity() {
             .putBoolean(PREF_STATUS_BAR_AUTO_HIDE, statusBarAutoHide)
             .putString(PREF_TRACKPAD_THEME, trackpadTheme)
             .putString(PREF_UI_THEME, uiTheme)
-            .putString(PREF_KEYBOARD_LAYOUT, keyboardLayoutName)
             .apply()
     }
 
@@ -5174,8 +5260,6 @@ fun TrackpadScreen(
     onStatusBarAutoHideChange: (Boolean) -> Unit,
     trackpadTheme: String,
     onTrackpadThemeChange: (String) -> Unit,
-    keyboardLayout: String,
-    onKeyboardLayoutChange: (String) -> Unit,
     uiTheme: String,
     onUiThemeChange: (String) -> Unit,
     batteryPercent: Int,
@@ -5450,84 +5534,8 @@ fun TrackpadScreen(
             }
         }
 
-        // Gear icon (top-right, always present, subtle)
-        IconButton(
-            onClick = {
-                lastInteractionTime = System.currentTimeMillis()
-                onToggleSettings()
-            },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 42.dp, end = 8.dp)
-                .alpha(0.25f)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = "Settings",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-
-        // Settings overlay (full-screen)
-        AnimatedVisibility(
-            visible = showSettings,
-            enter = fadeIn(tween(120)),
-            exit = fadeOut(tween(100))
-        ) {
-            SettingsOverlay(
-                onDismiss = onToggleSettings,
-                sensitivity = sensitivity,
-                onSensitivityChange = onSensitivityChange,
-                tapToClick = tapToClick,
-                onTapToClickChange = onTapToClickChange,
-                naturalScroll = naturalScroll,
-                onNaturalScrollChange = onNaturalScrollChange,
-                rippleEnabled = rippleEnabled,
-                onRippleChange = onRippleChange,
-                hapticsEnabled = hapticsEnabled,
-                onHapticsChange = onHapticsChange,
-                statusBarAutoHide = statusBarAutoHide,
-                onStatusBarAutoHideChange = onStatusBarAutoHideChange,
-                uiTheme = uiTheme,
-                onUiThemeChange = onUiThemeChange,
-                trackpadTheme = trackpadTheme,
-                onTrackpadThemeChange = onTrackpadThemeChange,
-                keyboardLayout = keyboardLayout,
-                onKeyboardLayoutChange = onKeyboardLayoutChange,
-                settingsInitialTab = settingsInitialTab,
-                connectedHostName = connectedHostName,
-                bondedDevices = bondedDevices,
-                isConnected = isConnected,
-                connectedDeviceAddress = bondedDevices.firstOrNull { (deviceNicknames[it.address] ?: it.name) == connectedHostName }?.address,
-                deviceNicknames = deviceNicknames,
-                onOpenDeviceManager = {
-                    onToggleSettings()
-                    onToggleDeviceManager()
-                },
-                onNavigateToPairingGuide = onNavigateToPairingGuide,
-                appVersion = appVersion
-            )
-        }
-
-        // Device Manager overlay
-        AnimatedVisibility(
-            visible = showDeviceManager,
-            enter = fadeIn(tween(300)),
-            exit = fadeOut(tween(300))
-        ) {
-            DeviceManagerOverlay(
-                bondedDevices = bondedDevices,
-                connectedDeviceAddress = bondedDevices.firstOrNull { isConnected && (deviceNicknames[it.address] ?: it.name) == connectedHostName }?.address,
-                deviceNicknames = deviceNicknames,
-                onRenameDevice = onRenameDevice,
-                onForgetDevice = onForgetDevice,
-                onDeviceSelected = onDeviceSelected,
-                onNavigateToPairingGuide = onNavigateToPairingGuide,
-                onDismiss = onDismissDeviceManager
-            )
-        }
+        // Settings and Device Manager overlays are hosted by the activity so
+        // they're reachable from every mode (opened via the mode switcher).
 
         // Reconnect sheet (manual, from tapping disconnected pill)
         AnimatedVisibility(
@@ -5664,8 +5672,6 @@ private fun SettingsOverlay(
     onUiThemeChange: (String) -> Unit,
     trackpadTheme: String,
     onTrackpadThemeChange: (String) -> Unit,
-    keyboardLayout: String,
-    onKeyboardLayoutChange: (String) -> Unit,
     settingsInitialTab: Int,
     connectedHostName: String?,
     bondedDevices: List<BluetoothDevice>,
@@ -5943,89 +5949,6 @@ private fun SettingsOverlay(
                 }
                 Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
 
-                // ── Keyboard ──
-                Text("KEYBOARD", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-
-                val layoutMeta = mapOf(
-                    "qwerty" to Pair("English (US, UK)", listOf("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")),
-                    "azerty" to Pair("French", listOf("AZERTYUIOP", "QSDFGHJKLM", "WXCVBN")),
-                    "qwertz" to Pair("German", listOf("QWERTZUIOP", "ASDFGHJKL", "YXCVBNM")),
-                    "dvorak" to Pair("Ergonomic", listOf("',.PYFGCRL", "AOEUIDHTNS", ";QJKXBMWVZ")),
-                    "colemak" to Pair("Ergonomic", listOf("QWFPGJLUY;", "ARSTDHNEIO", "ZXCVBKM"))
-                )
-                val currentMeta = layoutMeta[keyboardLayout] ?: layoutMeta["qwerty"]!!
-
-                Column(modifier = Modifier.padding(top = 15.dp, bottom = 4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        Text("Layout", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
-                        Text(currentMeta.first, fontSize = 13.sp, color = mute)
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Pill chips — horizontally scrollable
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .horizontalScroll(rememberScrollState())
-                            .padding(bottom = 8.dp)
-                    ) {
-                        KeyboardLayouts.LAYOUT_OPTIONS.forEach { (id, label) ->
-                            val isSel = keyboardLayout == id
-                            val pillBg by animateColorAsState(if (isSel) ink else Color.Transparent, tween(220))
-                            val pillBorder by animateColorAsState(if (isSel) ink else line, tween(220))
-                            val pillText by animateColorAsState(if (isSel) bg else mute, tween(220))
-                            Text(
-                                label, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                                color = pillText,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(pillBg)
-                                    .border(1.dp, pillBorder, RoundedCornerShape(50))
-                                    .clickable { onKeyboardLayoutChange(id) }
-                                    .padding(horizontal = 18.dp, vertical = 9.dp)
-                            )
-                        }
-                    }
-
-                    // Mini keyboard preview
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp, bottom = 10.dp)
-                            .border(1.dp, line, RoundedCornerShape(14.dp))
-                            .padding(horizontal = 8.dp, vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        currentMeta.second.forEach { row ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                row.forEachIndexed { idx, ch ->
-                                    if (idx > 0) Spacer(modifier = Modifier.width(4.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f, fill = false)
-                                            .size(29.dp, 30.dp)
-                                            .border(1.dp, line, RoundedCornerShape(7.dp)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            ch.toString(), fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                                            color = ink.copy(alpha = 0.85f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
-
                 // ── Gestures ──
                 Text("GESTURES", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
 
@@ -6099,7 +6022,7 @@ private fun SettingsOverlay(
                     modifier = Modifier.fillMaxWidth().clickable {
                         onSensitivityChange(1.3f); onTapToClickChange(true); onNaturalScrollChange(false)
                         onHapticsChange(true); onRippleChange(true); onStatusBarAutoHideChange(true)
-                        onUiThemeChange("dark"); onTrackpadThemeChange("graphite"); onKeyboardLayoutChange("qwerty")
+                        onUiThemeChange("dark"); onTrackpadThemeChange("graphite")
                     }.padding(vertical = 16.dp)
                 )
 
@@ -6989,185 +6912,6 @@ object KeyboardLayouts {
                 KeyDef("🖱", "🖱", 0, 1.0f, KeyType.ACTION, actionId = "trackpad")
             )
         )
-    )
-    // ── AZERTY (French) — full keyboard ──
-    val FULL_AZERTY = KeyboardLayout(
-        rows = listOf(
-            FULL_QWERTY.rows[0], // Media row (same)
-            FULL_QWERTY.rows[1], // Number row (same HID, labels match host)
-            // Row 2: AZERTY
-            listOf(
-                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
-                KeyDef("a", "A", S.KEY_Q), KeyDef("z", "Z", S.KEY_W),
-                KeyDef("e", "E", S.KEY_E), KeyDef("r", "R", S.KEY_R),
-                KeyDef("t", "T", S.KEY_T), KeyDef("y", "Y", S.KEY_Y),
-                KeyDef("u", "U", S.KEY_U), KeyDef("i", "I", S.KEY_I),
-                KeyDef("o", "O", S.KEY_O), KeyDef("p", "P", S.KEY_P),
-                KeyDef("[", "{", S.KEY_LBRACKET), KeyDef("]", "}", S.KEY_RBRACKET),
-                KeyDef("\\", "|", S.KEY_BACKSLASH, 1.25f)
-            ),
-            // Row 3: Home row
-            listOf(
-                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
-                KeyDef("q", "Q", S.KEY_A), KeyDef("s", "S", S.KEY_S),
-                KeyDef("d", "D", S.KEY_D), KeyDef("f", "F", S.KEY_F),
-                KeyDef("g", "G", S.KEY_G), KeyDef("h", "H", S.KEY_H),
-                KeyDef("j", "J", S.KEY_J), KeyDef("k", "K", S.KEY_K),
-                KeyDef("l", "L", S.KEY_L), KeyDef("m", "M", S.KEY_SEMICOLON),
-                KeyDef("'", "\"", S.KEY_APOSTROPHE),
-                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
-            ),
-            // Row 4: Bottom row
-            listOf(
-                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
-                KeyDef("w", "W", S.KEY_Z), KeyDef("x", "X", S.KEY_X),
-                KeyDef("c", "C", S.KEY_C), KeyDef("v", "V", S.KEY_V),
-                KeyDef("b", "B", S.KEY_B), KeyDef("n", "N", S.KEY_N),
-                KeyDef(",", "<", S.KEY_M), KeyDef(";", ":", S.KEY_COMMA),
-                KeyDef(".", ">", S.KEY_PERIOD), KeyDef("/", "?", S.KEY_SLASH),
-                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
-            ),
-            FULL_QWERTY.rows[5] // Space row (same)
-        )
-    )
-
-    // ── QWERTZ (German) — full keyboard ──
-    val FULL_QWERTZ = KeyboardLayout(
-        rows = listOf(
-            FULL_QWERTY.rows[0],
-            FULL_QWERTY.rows[1],
-            // Row 2: QWERTZ
-            listOf(
-                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
-                KeyDef("q", "Q", S.KEY_Q), KeyDef("w", "W", S.KEY_W),
-                KeyDef("e", "E", S.KEY_E), KeyDef("r", "R", S.KEY_R),
-                KeyDef("t", "T", S.KEY_T), KeyDef("z", "Z", S.KEY_Y),
-                KeyDef("u", "U", S.KEY_U), KeyDef("i", "I", S.KEY_I),
-                KeyDef("o", "O", S.KEY_O), KeyDef("p", "P", S.KEY_P),
-                KeyDef("ü", "Ü", S.KEY_LBRACKET), KeyDef("+", "*", S.KEY_RBRACKET),
-                KeyDef("#", "'", S.KEY_BACKSLASH, 1.25f)
-            ),
-            // Row 3: Home row
-            listOf(
-                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
-                KeyDef("a", "A", S.KEY_A), KeyDef("s", "S", S.KEY_S),
-                KeyDef("d", "D", S.KEY_D), KeyDef("f", "F", S.KEY_F),
-                KeyDef("g", "G", S.KEY_G), KeyDef("h", "H", S.KEY_H),
-                KeyDef("j", "J", S.KEY_J), KeyDef("k", "K", S.KEY_K),
-                KeyDef("l", "L", S.KEY_L), KeyDef("ö", "Ö", S.KEY_SEMICOLON),
-                KeyDef("ä", "Ä", S.KEY_APOSTROPHE),
-                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
-            ),
-            // Row 4: Bottom row
-            listOf(
-                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
-                KeyDef("y", "Y", S.KEY_Z), KeyDef("x", "X", S.KEY_X),
-                KeyDef("c", "C", S.KEY_C), KeyDef("v", "V", S.KEY_V),
-                KeyDef("b", "B", S.KEY_B), KeyDef("n", "N", S.KEY_N),
-                KeyDef("m", "M", S.KEY_M), KeyDef(",", ";", S.KEY_COMMA),
-                KeyDef(".", ":", S.KEY_PERIOD), KeyDef("-", "_", S.KEY_SLASH),
-                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
-            ),
-            FULL_QWERTY.rows[5]
-        )
-    )
-
-    // ── Dvorak — full keyboard ──
-    val FULL_DVORAK = KeyboardLayout(
-        rows = listOf(
-            FULL_QWERTY.rows[0],
-            FULL_QWERTY.rows[1],
-            // Row 2: Dvorak top
-            listOf(
-                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
-                KeyDef("'", "\"", S.KEY_Q), KeyDef(",", "<", S.KEY_W),
-                KeyDef(".", ">", S.KEY_E), KeyDef("p", "P", S.KEY_R),
-                KeyDef("y", "Y", S.KEY_T), KeyDef("f", "F", S.KEY_Y),
-                KeyDef("g", "G", S.KEY_U), KeyDef("c", "C", S.KEY_I),
-                KeyDef("r", "R", S.KEY_O), KeyDef("l", "L", S.KEY_P),
-                KeyDef("/", "?", S.KEY_LBRACKET), KeyDef("=", "+", S.KEY_RBRACKET),
-                KeyDef("\\", "|", S.KEY_BACKSLASH, 1.25f)
-            ),
-            // Row 3: Home row
-            listOf(
-                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
-                KeyDef("a", "A", S.KEY_A), KeyDef("o", "O", S.KEY_S),
-                KeyDef("e", "E", S.KEY_D), KeyDef("u", "U", S.KEY_F),
-                KeyDef("i", "I", S.KEY_G), KeyDef("d", "D", S.KEY_H),
-                KeyDef("h", "H", S.KEY_J), KeyDef("t", "T", S.KEY_K),
-                KeyDef("n", "N", S.KEY_L), KeyDef("s", "S", S.KEY_SEMICOLON),
-                KeyDef("-", "_", S.KEY_APOSTROPHE),
-                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
-            ),
-            // Row 4: Bottom row
-            listOf(
-                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
-                KeyDef(";", ":", S.KEY_Z), KeyDef("q", "Q", S.KEY_X),
-                KeyDef("j", "J", S.KEY_C), KeyDef("k", "K", S.KEY_V),
-                KeyDef("x", "X", S.KEY_B), KeyDef("b", "B", S.KEY_N),
-                KeyDef("m", "M", S.KEY_M), KeyDef("w", "W", S.KEY_COMMA),
-                KeyDef("v", "V", S.KEY_PERIOD), KeyDef("z", "Z", S.KEY_SLASH),
-                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
-            ),
-            FULL_QWERTY.rows[5]
-        )
-    )
-
-    // ── Colemak — full keyboard ──
-    val FULL_COLEMAK = KeyboardLayout(
-        rows = listOf(
-            FULL_QWERTY.rows[0],
-            FULL_QWERTY.rows[1],
-            // Row 2: Colemak top
-            listOf(
-                KeyDef("Tab", "Tab", S.KEY_TAB, 1.25f, KeyType.CHAR),
-                KeyDef("q", "Q", S.KEY_Q), KeyDef("w", "W", S.KEY_W),
-                KeyDef("f", "F", S.KEY_E), KeyDef("p", "P", S.KEY_R),
-                KeyDef("g", "G", S.KEY_T), KeyDef("j", "J", S.KEY_Y),
-                KeyDef("l", "L", S.KEY_U), KeyDef("u", "U", S.KEY_I),
-                KeyDef("y", "Y", S.KEY_O), KeyDef(";", ":", S.KEY_P),
-                KeyDef("[", "{", S.KEY_LBRACKET), KeyDef("]", "}", S.KEY_RBRACKET),
-                KeyDef("\\", "|", S.KEY_BACKSLASH, 1.25f)
-            ),
-            // Row 3: Home row
-            listOf(
-                KeyDef("Caps", "Caps", S.KEY_CAPS_LOCK, 1.5f, KeyType.CHAR),
-                KeyDef("a", "A", S.KEY_A), KeyDef("r", "R", S.KEY_S),
-                KeyDef("s", "S", S.KEY_D), KeyDef("t", "T", S.KEY_F),
-                KeyDef("d", "D", S.KEY_G), KeyDef("h", "H", S.KEY_H),
-                KeyDef("n", "N", S.KEY_J), KeyDef("e", "E", S.KEY_K),
-                KeyDef("i", "I", S.KEY_L), KeyDef("o", "O", S.KEY_SEMICOLON),
-                KeyDef("'", "\"", S.KEY_APOSTROPHE),
-                KeyDef("Enter", "Enter", S.KEY_ENTER, 1.75f, KeyType.CHAR)
-            ),
-            // Row 4: Bottom row
-            listOf(
-                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT),
-                KeyDef("z", "Z", S.KEY_Z), KeyDef("x", "X", S.KEY_X),
-                KeyDef("c", "C", S.KEY_C), KeyDef("v", "V", S.KEY_V),
-                KeyDef("b", "B", S.KEY_B), KeyDef("k", "K", S.KEY_N),
-                KeyDef("m", "M", S.KEY_M), KeyDef(",", "<", S.KEY_COMMA),
-                KeyDef(".", ">", S.KEY_PERIOD), KeyDef("/", "?", S.KEY_SLASH),
-                KeyDef("⇧", "⇧", 0, 2.0f, KeyType.SHIFT)
-            ),
-            FULL_QWERTY.rows[5]
-        )
-    )
-
-    fun fullLayoutFromName(name: String): KeyboardLayout = when (name) {
-        "azerty" -> FULL_AZERTY
-        "qwertz" -> FULL_QWERTZ
-        "dvorak" -> FULL_DVORAK
-        "colemak" -> FULL_COLEMAK
-        else -> FULL_QWERTY
-    }
-
-    val LAYOUT_OPTIONS = listOf(
-        "qwerty" to "QWERTY",
-        "azerty" to "AZERTY",
-        "qwertz" to "QWERTZ",
-        "dvorak" to "Dvorak",
-        "colemak" to "Colemak"
     )
 }
 
@@ -8070,6 +7814,7 @@ fun ModePopup(
     isVisible: Boolean,
     onModeSelected: (AppScreen) -> Unit,
     onToggle: () -> Unit,
+    onOpenSettings: (() -> Unit)? = null,
     showTrigger: Boolean = true,
     dropDown: Boolean = false,
     modifier: Modifier = Modifier
@@ -8174,6 +7919,29 @@ fun ModePopup(
                                 maxLines = 1
                             )
                         }
+                    }
+                }
+                if (onOpenSettings != null) {
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 2.dp)
+                            .width(1.dp)
+                            .height(22.dp)
+                            .background(Color.White.copy(alpha = 0.1f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onOpenSettings() }
+                            .padding(horizontal = 13.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                            tint = Color.White.copy(alpha = 0.45f),
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
