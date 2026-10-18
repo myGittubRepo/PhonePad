@@ -98,6 +98,14 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.animation.core.Easing
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -327,6 +335,77 @@ object AppThemes {
     }
 }
 
+/** Colour skin for the full landscape keyboard (Settings → Keyboard theme). */
+data class KeyboardSkin(
+    val id: String,
+    val name: String,
+    val bgTop: Color, val bgBottom: Color,
+    val keyTop: Color, val keyBottom: Color, val keyEdge: Color, val keyHighlight: Color,
+    val modTop: Color, val modBottom: Color, val modEdge: Color, val modHighlight: Color,
+    val ink: Color, val modInk: Color,
+    val escTop: Color, val escBottom: Color, val escEdge: Color, val escInk: Color,
+    val slabTop: Color, val slabBottom: Color, val slabEdge: Color, val slabLine: Color, val slabBorder: Color,
+    val icon: Color, val sep: Color, val brand: Color,
+    val capPressed: Color,
+    val keyBorder: Color = Color.Transparent,
+    val litInk: Color? = null,
+    // Split mode
+    val pad: Color = bgTop, val padLine: Color = Color.Transparent, val padShade: Color = Color.Transparent,
+    val hint: Color = icon, val sub: Color = modInk, val bar: Color = sep,
+    val splitSlabTop: Color = slabTop, val splitSlabBottom: Color = slabBottom,
+    val splitSlabEdge: Color = slabEdge, val splitSlabLine: Color = slabLine, val splitIcon: Color = icon
+)
+
+object KeyboardSkins {
+    val Grey = KeyboardSkin(
+        id = "grey", name = "Grey",
+        bgTop = Color(0xFFD5D7DB), bgBottom = Color(0xFFD5D7DB),
+        keyTop = Color(0xFFFFFFFF), keyBottom = Color(0xFFFFFFFF), keyEdge = Color(0xFF9A9DA3), keyHighlight = Color.Transparent,
+        modTop = Color(0xFFC1C5CB), modBottom = Color(0xFFB4B8BF), modEdge = Color(0xFF878A90), modHighlight = Color(0x61FFFFFF),
+        ink = Color(0xFF111214), modInk = Color(0xFF2A2C31),
+        escTop = Color(0xFF5B4A3B), escBottom = Color(0xFF5B4A3B), escEdge = Color(0xFF3A2F27), escInk = Color.White,
+        slabTop = Color(0xFF45484F), slabBottom = Color(0xFF3A3D43), slabEdge = Color(0xFF24262A), slabLine = Color(0x12FFFFFF), slabBorder = Color.Transparent,
+        icon = Color(0xFFECEDEF), sep = Color(0x2EFFFFFF), brand = Color(0x52111214),
+        capPressed = Color(0x2E7F7F7F),
+        pad = Color(0xFFC7CACF), padLine = Color(0x24000000), padShade = Color(0x1A000000),
+        hint = Color(0x59111214), sub = Color(0xFF8A8D93), bar = Color(0x4D000000)
+    )
+    val Obsidian = KeyboardSkin(
+        id = "obsidian", name = "Obsidian & Ember",
+        bgTop = Color(0xFF161617), bgBottom = Color(0xFF0C0C0D),
+        keyTop = Color(0xFF232326), keyBottom = Color(0xFF1A1A1C), keyEdge = Color(0xFF000000), keyHighlight = Color(0x12FFFFFF),
+        modTop = Color(0xFF343437), modBottom = Color(0xFF2A2A2D), modEdge = Color(0xFF050505), modHighlight = Color(0x14FFFFFF),
+        ink = Color(0xFFF3F3F1), modInk = Color(0xFFA6A6AB),
+        escTop = Color(0xFFF57A50), escBottom = Color(0xFFE85E30), escEdge = Color(0xFF9E3D1C), escInk = Color.White,
+        slabTop = Color(0xFF18181A), slabBottom = Color(0xFF141415), slabEdge = Color(0xFF000000), slabLine = Color(0x0FFFFFFF), slabBorder = Color(0x12FFFFFF),
+        icon = Color(0xFFECECEA), sep = Color(0x24FFFFFF), brand = Color(0xB3F26A3D),
+        capPressed = Color(0x14FFFFFF),
+        keyBorder = Color(0x09FFFFFF),
+        litInk = Color(0xFFF26A3D),
+        pad = Color(0xFF1C1C1E), padLine = Color(0x21FFFFFF), padShade = Color(0x8C000000),
+        hint = Color(0x61ECECEA), sub = Color(0xFF76767B), bar = Color(0x59FFFFFF),
+        splitSlabTop = Color(0xFF3C3C40), splitSlabBottom = Color(0xFF323235),
+        splitSlabEdge = Color(0xFF0A0A0B), splitSlabLine = Color(0x1FFFFFFF), splitIcon = Color.White
+    )
+    val Linen = KeyboardSkin(
+        id = "linen", name = "Linen & Navy",
+        bgTop = Color(0xFFE8E2D8), bgBottom = Color(0xFFE8E2D8),
+        keyTop = Color(0xFFFFFDF9), keyBottom = Color(0xFFFFFDF9), keyEdge = Color(0xFFB9AE9E), keyHighlight = Color.Transparent,
+        modTop = Color(0xFFDDD5C8), modBottom = Color(0xFFD3C9BA), modEdge = Color(0xFFA99D8B), modHighlight = Color(0x61FFFFFF),
+        ink = Color(0xFF1D2B3E), modInk = Color(0xFF1D2B3E),
+        escTop = Color(0xFF1F3A5F), escBottom = Color(0xFF1F3A5F), escEdge = Color(0xFF11233C), escInk = Color(0xFFF4EFE6),
+        slabTop = Color(0x8CFFFFFF), slabBottom = Color(0x8CFFFFFF), slabEdge = Color(0x1A000000), slabLine = Color(0xBFFFFFFF), slabBorder = Color.Transparent,
+        icon = Color(0xFF1D2B3E), sep = Color(0x261D2B3E), brand = Color(0x611F3A5F),
+        capPressed = Color(0x2E7F7F7F),
+        pad = Color(0xFFDCD4C6), padLine = Color(0x261D2B3E), padShade = Color(0x1A3C2D1E),
+        hint = Color(0x591D2B3E), sub = Color(0xFF9A8F7F), bar = Color(0x4D1D2B3E)
+    )
+
+    val ALL = listOf(Grey, Obsidian, Linen)
+
+    fun fromId(id: String): KeyboardSkin = ALL.firstOrNull { it.id == id } ?: Grey
+}
+
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -343,6 +422,7 @@ class MainActivity : ComponentActivity() {
         private const val PREF_HAPTICS_ENABLED = "_haptics_enabled"
         private const val PREF_STATUS_BAR_AUTO_HIDE = "status_bar_auto_hide"
         private const val PREF_TRACKPAD_THEME = "trackpad_theme"
+        private const val PREF_KEYBOARD_SKIN = "keyboard_skin"
         private const val PREF_UI_THEME = "ui_theme"
         private const val PREF_DEVICE_NICKNAME = "_nickname"
         private const val PREF_SPLIT_RATIO = "_split_ratio"
@@ -464,6 +544,7 @@ class MainActivity : ComponentActivity() {
     private var hapticsEnabled by mutableStateOf(true)
     private var statusBarAutoHide by mutableStateOf(true)
     private var trackpadTheme by mutableStateOf("midnight")
+    private var keyboardSkin by mutableStateOf("grey")
     private var uiTheme by mutableStateOf("dark") // dark, light
 
     // Phase 1 UI navigation
@@ -894,6 +975,7 @@ class MainActivity : ComponentActivity() {
         loadDeviceNicknames()
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
         trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "midnight") ?: "midnight"
+        keyboardSkin = prefs.getString(PREF_KEYBOARD_SKIN, "grey") ?: "grey"
         uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
 
         val lastHost = prefs.getString(PREF_LAST_HOST_ADDRESS, null)
@@ -1100,6 +1182,7 @@ class MainActivity : ComponentActivity() {
                                                 hasBluetoothPermissions = hasBluetoothPermissions(),
                                                 onRequestPermissions = { requestBluetoothPermissions() },
                                                 onOpenAppSettings = { openAppSettings() },
+                                                skin = KeyboardSkins.fromId(keyboardSkin),
                                                 modifier = Modifier
                                             )
                                             AppScreen.KEYBOARD -> KeyboardScreen(
@@ -1112,17 +1195,18 @@ class MainActivity : ComponentActivity() {
                                                 onConsumerRelease = { sendConsumerReport(0) },
                                                 doubleSpaceForPeriod = doubleSpaceForPeriod,
                                                 keySoundEnabled = keySoundEnabled,
-                                                theme = AppThemes.fromName(trackpadTheme)
+                                                theme = AppThemes.fromName(trackpadTheme),
+                                                skin = KeyboardSkins.fromId(keyboardSkin)
                                             )
                                             AppScreen.SPLIT -> {
                                                 val splitTheme = AppThemes.fromName(trackpadTheme)
+                                                val splitSkin = KeyboardSkins.fromId(keyboardSkin)
                                                 SplitScreen(
                                                     trackpadContent = { mod ->
                                                         Box(modifier = mod) {
                                                             Box(
                                                                 modifier = Modifier
                                                                     .fillMaxSize()
-                                                                    .background(splitTheme.surface)
                                                                     .then(
                                                                         if (connectedDevice != null) {
                                                                             Modifier.pointerInteropFilter { event ->
@@ -1131,11 +1215,11 @@ class MainActivity : ComponentActivity() {
                                                                         } else Modifier
                                                                     )
                                                             ) {
-                                                                if (connectedDevice == null) {
-                                                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                                                        Text("Not connected", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp)
-                                                                    }
-                                                                }
+                                                                TrackpadPadSurface(
+                                                                    skin = splitSkin,
+                                                                    hint = if (connectedDevice != null) "TRACKPAD" else "NOT CONNECTED",
+                                                                    modifier = Modifier.padding(start = 13.dp, end = 13.dp, top = 10.dp)
+                                                                )
                                                             }
                                                         }
                                                     },
@@ -1147,10 +1231,12 @@ class MainActivity : ComponentActivity() {
                                                             doubleSpaceForPeriod = doubleSpaceForPeriod,
                                                             keySoundEnabled = keySoundEnabled,
                                                             theme = splitTheme,
+                                                            skin = splitSkin,
                                                             modifier = mod
                                                         )
                                                     },
-                                                    theme = splitTheme
+                                                    theme = splitTheme,
+                                                    skin = splitSkin
                                                 )
                                             }
                                             else -> {}
@@ -1226,15 +1312,17 @@ class MainActivity : ComponentActivity() {
                                                         showSettings = true
                                                     },
                                                     dropDown = true,
+                                                    triggerSkin = KeyboardSkins.fromId(keyboardSkin),
                                                     modifier = Modifier
                                                         .align(Alignment.TopCenter)
                                                         .windowInsetsPadding(WindowInsets.statusBars)
-                                                        .padding(top = 8.dp)
+                                                        .padding(top = 20.dp)
                                                 )
                                             }
                                             else -> {
                                                 // Trackpad: mouse icon trigger at bottom-right, popup above
                                                 ModePopup(
+                                                    triggerSkin = KeyboardSkins.fromId(keyboardSkin),
                                                     currentMode = currentScreen,
                                                     isVisible = showModePopup,
                                                     onModeSelected = { mode ->
@@ -1254,7 +1342,7 @@ class MainActivity : ComponentActivity() {
                                                     modifier = Modifier
                                                         .align(Alignment.BottomEnd)
                                                         .windowInsetsPadding(WindowInsets.navigationBars)
-                                                        .padding(end = 12.dp, bottom = 12.dp)
+                                                        .padding(end = 24.dp, bottom = 24.dp)
                                                 )
                                             }
                                         }
@@ -1292,8 +1380,8 @@ class MainActivity : ComponentActivity() {
                                                 onStatusBarAutoHideChange = { statusBarAutoHide = it; saveGlobalSettings() },
                                                 uiTheme = uiTheme,
                                                 onUiThemeChange = { uiTheme = it; saveGlobalSettings() },
-                                                trackpadTheme = trackpadTheme,
-                                                onTrackpadThemeChange = { trackpadTheme = it; saveGlobalSettings() },
+                                                keyboardSkin = keyboardSkin,
+                                                onKeyboardSkinChange = { keyboardSkin = it; saveGlobalSettings() },
                                                 settingsInitialTab = settingsInitialTab,
                                                 connectedHostName = connectedHostName,
                                                 bondedDevices = bondedDevices,
@@ -1629,6 +1717,7 @@ class MainActivity : ComponentActivity() {
         hapticsEnabled = prefs.getBoolean(address + PREF_HAPTICS_ENABLED, true)
         statusBarAutoHide = prefs.getBoolean(PREF_STATUS_BAR_AUTO_HIDE, true)
         trackpadTheme = prefs.getString(PREF_TRACKPAD_THEME, "midnight") ?: "midnight"
+        keyboardSkin = prefs.getString(PREF_KEYBOARD_SKIN, "grey") ?: "grey"
         uiTheme = prefs.getString(PREF_UI_THEME, "dark") ?: "dark"
         loadDeviceNicknames()
         Log.d(TAG, "Loaded settings for $address: sensitivity=$sensitivityMultiplier, tapToClick=$tapToClickEnabled, naturalScroll=$naturalScrollEnabled, ripple=$rippleEnabled, haptics=$hapticsEnabled")
@@ -1650,6 +1739,7 @@ class MainActivity : ComponentActivity() {
         prefs.edit()
             .putBoolean(PREF_STATUS_BAR_AUTO_HIDE, statusBarAutoHide)
             .putString(PREF_TRACKPAD_THEME, trackpadTheme)
+            .putString(PREF_KEYBOARD_SKIN, keyboardSkin)
             .putString(PREF_UI_THEME, uiTheme)
             .apply()
     }
@@ -5282,6 +5372,7 @@ fun TrackpadScreen(
     hasBluetoothPermissions: Boolean,
     onRequestPermissions: () -> Unit,
     onOpenAppSettings: () -> Unit,
+    skin: KeyboardSkin = KeyboardSkins.Grey,
     modifier: Modifier = Modifier
 ) {
     val themeColors = AppThemes.fromName(trackpadTheme)
@@ -5356,23 +5447,15 @@ fun TrackpadScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(darkSurface)
+            .background(skin.bgBottom)
     ) {
-        // Very subtle ambient gradient — theme-aware
-        if (accentGlow != Color.Transparent) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val cx = size.width / 2f
-                val cy = size.height * 0.35f
-                val glowRadius = size.minDimension * 0.5f
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        listOf(accentGlow.copy(alpha = 0.012f + breathe * 0.005f), Color.Transparent),
-                        center = Offset(cx, cy), radius = glowRadius
-                    ),
-                    radius = glowRadius, center = Offset(cx, cy)
-                )
-            }
-        }
+        // Rounded pad surface (visual only; touch area stays edge-to-edge)
+        TrackpadPadSurface(
+            skin = skin,
+            showBrand = true,
+            hint = null,
+            modifier = Modifier.padding(12.dp)
+        )
 
         // Connected celebration glow
         if (connectGlow.value > 0f) {
@@ -5429,19 +5512,19 @@ fun TrackpadScreen(
                                 val radius = 12f + w * (size.minDimension / 2f - 12f)
                                 val alpha = (1f - w) * 0.4f
                                 drawCircle(
-                                    color = Color(0xFF7B7FD4).copy(alpha = alpha),
+                                    color = skin.escBottom.copy(alpha = alpha),
                                     radius = radius,
                                     center = Offset(cx, cy),
                                     style = Stroke(width = 2.5f)
                                 )
                             }
                             // BT icon center
-                            drawCircle(Color(0xFF7B7FD4), radius = 14f, center = Offset(cx, cy))
+                            drawCircle(skin.escBottom, radius = 14f, center = Offset(cx, cy))
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
                             text = "Connecting...",
-                            color = Color(0xFF7B7FD4).copy(alpha = 0.8f),
+                            color = skin.escBottom.copy(alpha = 0.8f),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -5449,7 +5532,7 @@ fun TrackpadScreen(
                         // Subtle trackpad outline hint
                         Canvas(modifier = Modifier.size(80.dp)) {
                             drawRoundRect(
-                                color = Color.White.copy(alpha = 0.08f + breathe * 0.04f),
+                                color = skin.ink.copy(alpha = 0.10f + breathe * 0.05f),
                                 cornerRadius = CornerRadius(12f),
                                 style = Stroke(width = 1.5f)
                             )
@@ -5465,12 +5548,12 @@ fun TrackpadScreen(
                                 lineTo(cx + size.width * 0.2f, cy + size.height * 0.15f)
                                 close()
                             }
-                            drawPath(arrowPath, color = Color.White.copy(alpha = 0.1f + breathe * 0.05f))
+                            drawPath(arrowPath, color = skin.ink.copy(alpha = 0.14f + breathe * 0.06f))
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
                             text = "Not connected",
-                            color = Color.White.copy(alpha = 0.35f),
+                            color = skin.hint,
                             fontSize = 15.sp
                         )
                     }
@@ -5481,7 +5564,7 @@ fun TrackpadScreen(
                                 onClick = { onDeviceSelected(device) },
                                 modifier = Modifier.padding(vertical = 4.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Color(0xFF7B7FD4)
+                                    contentColor = skin.escBottom
                                 ),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
@@ -5501,12 +5584,7 @@ fun TrackpadScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .alpha(statusBarAlpha)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Black.copy(alpha = 0.5f), Color.Black.copy(alpha = 0.15f), Color.Transparent)
-                    )
-                )
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(start = 24.dp, end = 26.dp, top = 22.dp, bottom = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -5520,14 +5598,15 @@ fun TrackpadScreen(
                 },
                 onLongClick = {
                     onToggleDeviceManager()
-                }
+                },
+                ink = skin.ink
             )
 
             // Battery % (right)
             if (batteryPercent >= 0) {
                 Text(
                     text = "$batteryPercent%",
-                    color = Color.White.copy(alpha = 0.5f),
+                    color = skin.ink.copy(alpha = 0.5f),
                     fontSize = 11.sp,
                     letterSpacing = 0.5.sp
                 )
@@ -5593,7 +5672,8 @@ private fun ConnectionStatusPill(
     isConnected: Boolean,
     connectedHostName: String?,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    ink: Color = Color.White
 ) {
     val dotColor = when {
         isConnected -> Color(0xFF0D9488)
@@ -5615,7 +5695,7 @@ private fun ConnectionStatusPill(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+            .background(ink.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
@@ -5633,7 +5713,7 @@ private fun ConnectionStatusPill(
                 connectionStatus == "CONNECTING" -> "Reconnecting..."
                 else -> "Disconnected"
             },
-            color = Color.White.copy(alpha = 0.8f),
+            color = ink.copy(alpha = 0.8f),
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium
         )
@@ -5670,8 +5750,8 @@ private fun SettingsOverlay(
     onStatusBarAutoHideChange: (Boolean) -> Unit,
     uiTheme: String,
     onUiThemeChange: (String) -> Unit,
-    trackpadTheme: String,
-    onTrackpadThemeChange: (String) -> Unit,
+    keyboardSkin: String,
+    onKeyboardSkinChange: (String) -> Unit,
     settingsInitialTab: Int,
     connectedHostName: String?,
     bondedDevices: List<BluetoothDevice>,
@@ -5682,26 +5762,16 @@ private fun SettingsOverlay(
     onNavigateToPairingGuide: () -> Unit,
     appVersion: String
 ) {
-    val context = LocalContext.current
     val isDark = uiTheme == "dark"
+    val c = if (isDark) SettingsPalette.Dark else SettingsPalette.Light
 
-    val bg = if (isDark) Color(0xFF0C0C0E) else Color(0xFFF8F7F4)
-    val ink = if (isDark) Color(0xFFF2F2F4) else Color(0xFF16161A)
-    val mute = if (isDark) Color(0xFF85858F) else Color(0xFF74747C)
-    val line = if (isDark) Color.White.copy(alpha = 0.09f) else Color.Black.copy(alpha = 0.10f)
-    val ok = if (isDark) Color(0xFF3DDC97) else Color(0xFF1FA971)
-    val sliderTrack = if (isDark) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.16f)
-    val thumbCol = if (isDark) Color(0xFF0C0C0E) else Color.White
+    // Design is specced in container-width units (1cq = 1% of the portrait screen width)
+    val config = LocalConfiguration.current
+    val density = LocalDensity.current
+    val cq = (minOf(config.screenWidthDp, config.screenHeightDp) / 100f).dp
+    fun cs(n: Float) = with(density) { (cq * n).toSp() }
 
-    val accentOptions = listOf(
-        Triple("graphite", "Graphite", ink),
-        Triple("indigo", "Indigo", Color(0xFF7A83FF)),
-        Triple("ember", "Ember", Color(0xFFF27A3A)),
-        Triple("aurora", "Aurora", Color(0xFF1FBF9A)),
-        Triple("rose", "Rose", Color(0xFFE56FA5))
-    )
-    val acc = accentOptions.firstOrNull { it.first == trackpadTheme }?.third ?: ink
-    val accentName = accentOptions.firstOrNull { it.first == trackpadTheme }?.second ?: "Graphite"
+    val currentSkin = KeyboardSkins.fromId(keyboardSkin)
 
     val slideAnim = remember { Animatable(1f) }
     LaunchedEffect(Unit) {
@@ -5709,383 +5779,629 @@ private fun SettingsOverlay(
     }
 
     val scrollState = rememberScrollState()
-    val headerHasBorder by remember { derivedStateOf { scrollState.value > 6 } }
+    val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .offset(y = (slideAnim.value * 1200).dp)
-            .background(bg)
+            .background(c.bg),
+        contentAlignment = Alignment.TopCenter
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .widthIn(max = cq * 100)
+                .fillMaxWidth()
+                .padding(top = maxOf(topInset, cq * 9))
+        ) {
+            // ── Header ──
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp)
-                    .drawBehind {
-                        if (headerHasBorder) drawLine(line, Offset(0f, size.height), Offset(size.width, size.height), 1f)
-                    }
-                    .padding(start = 24.dp, end = 24.dp, top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(start = cq * 5, end = cq * 5, top = cq * 2, bottom = cq * 3.6f),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Settings", fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = ink, letterSpacing = (-0.3).sp)
                 Text(
-                    "Done",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = ink,
-                    modifier = Modifier.clickable { onDismiss() }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp)
+                    "Settings", color = c.ink, fontSize = cs(7.6f), fontWeight = FontWeight.Bold,
+                    letterSpacing = cs(7.6f * -0.03f)
                 )
+                Box(
+                    modifier = Modifier
+                        .size(cq * 10)
+                        .clip(CircleShape)
+                        .background(c.card)
+                        .border(1.dp, c.line, CircleShape)
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    SettingsIcon(listOf("M5 12.5l4.5 4.5L19 7.5"), c.ink, cq * 4.4f, 2.2f)
+                }
             }
 
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(scrollState)
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 40.dp)
+                    .padding(start = cq * 5, end = cq * 5, bottom = cq * 14 + bottomInset)
             ) {
-                // ── Connected device ──
+                // ── Connection scene ──
                 Column(
-                    modifier = Modifier.padding(top = 20.dp, bottom = 22.dp)
+                    modifier = Modifier
+                        .padding(top = cq * 1)
+                        .fillMaxWidth()
+                        .shadow(cq * 2, RoundedCornerShape(cq * 5.6f), ambientColor = Color.Transparent, spotColor = Color.Black.copy(alpha = 0.12f))
+                        .clip(RoundedCornerShape(cq * 5.6f))
+                        .background(c.card)
+                        .border(1.dp, c.line, RoundedCornerShape(cq * 5.6f))
+                        .padding(start = cq * 4.6f, end = cq * 4.6f, top = cq * 6, bottom = cq * 4.6f),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("CONNECTED DEVICE", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
+                    ConnectionScene(c, isConnected, Modifier.width(cq * 72).height(cq * 72 * 132f / 240f))
+                    Text(
+                        connectedHostName ?: "No device",
+                        color = c.ink, fontSize = cs(6f), fontWeight = FontWeight.Bold,
+                        letterSpacing = cs(6f * -0.03f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = cq * 5)
+                    )
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
+                        modifier = Modifier.padding(top = cq * 1.4f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(cq * 1.6f)
                     ) {
-                        Column {
-                            Text(
-                                connectedHostName ?: "No device",
-                                fontSize = 23.sp, fontWeight = FontWeight.SemiBold, color = ink,
-                                letterSpacing = (-0.5).sp, lineHeight = 26.sp
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(if (isConnected) ok else mute))
-                                Spacer(modifier = Modifier.width(7.dp))
-                                Text(if (isConnected) "Connected" else "Not connected", fontSize = 13.5.sp, color = mute)
-                            }
-                        }
+                        PulseDot(if (isConnected) c.ok else c.faint, cq * 1.9f, cq * 2.2f, animate = isConnected)
                         Text(
-                            "Change", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = ink,
-                            textDecoration = TextDecoration.Underline,
-                            modifier = Modifier.clickable { onOpenDeviceManager() }.padding(bottom = 4.dp)
+                            if (isConnected) "Connected via Bluetooth" else "Not connected",
+                            color = c.soft, fontSize = cs(3.2f)
                         )
                     }
-                    Spacer(modifier = Modifier.height(22.dp))
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
-                }
-
-                // ── Pointer ──
-                Text("POINTER", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-
-                val speedLabel = when {
-                    sensitivity <= 0.7f -> "Precise"
-                    sensitivity <= 1.4f -> "Balanced"
-                    else -> "Fast"
-                }
-                Column(modifier = Modifier.padding(top = 15.dp, bottom = 20.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        Column {
-                            Text("Cursor speed", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
-                            Text(speedLabel, fontSize = 13.sp, color = mute)
-                        }
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                "${"%.1f".format(sensitivity)}", fontSize = 28.sp, fontWeight = FontWeight.Medium,
-                                color = ink, letterSpacing = (-0.5).sp
-                            )
-                            Text("×", fontSize = 15.sp, color = mute, modifier = Modifier.padding(start = 1.dp))
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    var sliderFraction by remember { mutableStateOf((sensitivity - 0.5f) / 2.5f) }
-                    LaunchedEffect(sensitivity) { sliderFraction = ((sensitivity - 0.5f) / 2.5f).coerceIn(0f, 1f) }
-
-                    Box(
                         modifier = Modifier
+                            .padding(top = cq * 5)
                             .fillMaxWidth()
-                            .height(30.dp)
-                            .pointerInput(Unit) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                    val w = size.width.toFloat()
-                                    fun update(x: Float) {
-                                        val f = (x / w).coerceIn(0f, 1f)
-                                        sliderFraction = f
-                                        val raw = 0.5f + f * 2.5f
-                                        val snapped = (raw * 10).roundToInt() / 10f
-                                        onSensitivityChange(snapped.coerceIn(0.5f, 3.0f))
-                                    }
-                                    update(down.position.x); down.consume()
-                                    while (true) {
-                                        val ev = awaitPointerEvent()
-                                        if (ev.changes.all { !it.pressed }) break
-                                        ev.changes.forEach { update(it.position.x); it.consume() }
-                                    }
-                                }
-                            }
-                    ) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            val trackH = 2.dp.toPx()
-                            val trackY = size.height / 2 - trackH / 2
-                            val thumbR = 10.dp.toPx()
-                            val fillW = sliderFraction * size.width
-
-                            drawRoundRect(sliderTrack, Offset(0f, trackY), Size(size.width, trackH), CornerRadius(trackH / 2))
-                            if (fillW > 0f) drawRoundRect(acc, Offset(0f, trackY), Size(fillW, trackH), CornerRadius(trackH / 2))
-
-                            val thumbX = fillW.coerceIn(thumbR, size.width - thumbR)
-                            val cy = size.height / 2
-                            drawCircle(Color.Black.copy(alpha = 0.3f), thumbR, Offset(thumbX, cy + 1.dp.toPx()))
-                            drawCircle(ink, thumbR, Offset(thumbX, cy))
-                            drawCircle(bg, thumbR - 2.dp.toPx(), Offset(thumbX, cy))
-                        }
-                    }
-
-                    Canvas(modifier = Modifier.fillMaxWidth().height(12.dp).padding(horizontal = 9.dp)) {
-                        val count = 26
-                        for (i in 0 until count) {
-                            val x = if (count > 1) size.width * i / (count - 1) else 0f
-                            val h = if (i % 5 == 0) 8.dp.toPx() else 5.dp.toPx()
-                            drawRect(sliderTrack, Offset(x, 0f), Size(1.dp.toPx(), h))
-                        }
-                    }
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("0.5×", fontSize = 12.sp, color = mute)
-                        Text("3×", fontSize = 12.sp, color = mute)
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-                        listOf(0.8f to "Precise", 1.3f to "Balanced", 2.2f to "Fast").forEach { (value, label) ->
-                            val isOn = speedLabel == label
-                            Column(modifier = Modifier.clickable { onSensitivityChange(value) }) {
-                                Text(
-                                    label, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                                    color = if (isOn) ink else mute,
-                                    modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
-                                )
-                                Box(modifier = Modifier.width(if (label == "Balanced") 64.dp else 52.dp).height(2.dp).background(if (isOn) acc else Color.Transparent))
-                            }
-                        }
-                    }
-                }
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
-
-                SettingsToggleRow("Tap to click", "Tap anywhere to left-click", tapToClick, onTapToClickChange, ink, mute, line, acc, sliderTrack, thumbCol)
-                SettingsToggleRow("Natural scroll", "Content follows your finger", naturalScroll, onNaturalScrollChange, ink, mute, line, acc, sliderTrack, thumbCol)
-                SettingsToggleRow("Haptic feedback", "Vibrate on tap and gesture", hapticsEnabled, onHapticsChange, ink, mute, line, acc, sliderTrack, thumbCol)
-
-                // ── Display ──
-                Text("DISPLAY", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-
-                SettingsToggleRow("Touch ripple", "Show a ripple where you touch", rippleEnabled, onRippleChange, ink, mute, line, acc, sliderTrack, thumbCol)
-                SettingsToggleRow("Auto-hide status bar", "Fades after 3 seconds", statusBarAutoHide, onStatusBarAutoHideChange, ink, mute, line, acc, sliderTrack, thumbCol)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 15.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Appearance", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
-                    Row(
-                        modifier = Modifier.border(1.dp, line, RoundedCornerShape(10.dp)).padding(2.dp)
-                    ) {
-                        listOf("Dark" to "dark", "Light" to "light").forEach { (label, value) ->
-                            val isSel = uiTheme == value
-                            Text(
-                                label, fontSize = 13.5.sp, fontWeight = FontWeight.Medium,
-                                color = if (isSel) bg else mute,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) ink else Color.Transparent)
-                                    .clickable { onUiThemeChange(value) }
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                }
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 15.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Accent", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
-                        Text(accentName, fontSize = 13.sp, color = mute, modifier = Modifier.padding(top = 1.dp))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                        accentOptions.forEach { (id, _, color) ->
-                            val isSel = trackpadTheme == id
-                            Box(
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .then(
-                                        if (isSel) Modifier.drawBehind {
-                                            drawCircle(color, radius = size.width / 2 + 3.5.dp.toPx(), style = Stroke(2.dp.toPx()))
-                                        } else Modifier
-                                    )
-                                    .clip(CircleShape)
-                                    .background(color)
-                                    .clickable { onTrackpadThemeChange(id) }
-                            )
-                        }
-                    }
-                }
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
-
-                // ── Gestures ──
-                Text("GESTURES", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-
-                val gestureGroups = listOf(
-                    Triple("One finger", 1, gestureData["1-finger"] ?: emptyList()),
-                    Triple("Two fingers", 2, gestureData["2-finger"] ?: emptyList()),
-                    Triple("Three fingers", 3, gestureData["3-finger"] ?: emptyList()),
-                    Triple("Four fingers", 4, gestureData["4-finger"] ?: emptyList())
-                )
-                gestureGroups.forEach { (label, fingerCount, entries) ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .clip(RoundedCornerShape(cq * 3.2f))
+                            .background(c.chip)
+                            .clickable { onOpenDeviceManager() }
+                            .padding(vertical = cq * 3.4f),
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = mute)
-                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            repeat(fingerCount) {
-                                Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(mute))
-                            }
-                        }
-                    }
-                    entries.forEach { entry ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(entry.gesture, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
-                            Text(entry.action, fontSize = 15.sp, color = mute)
-                        }
-                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+                        SettingsIcon(listOf("M7 7h11l-3-3M17 17H6l3 3"), c.ink, cq * 4.2f, 2f)
+                        Spacer(Modifier.width(cq * 2))
+                        Text("Switch device", color = c.ink, fontSize = cs(3.4f), fontWeight = FontWeight.SemiBold)
                     }
                 }
 
-                // ── Devices ──
-                Text("DEVICES", fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = mute, letterSpacing = 1.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-
-                if (bondedDevices.isEmpty()) {
-                    Text("No paired devices", fontSize = 14.sp, color = mute, modifier = Modifier.padding(vertical = 15.dp))
-                } else {
-                    bondedDevices.forEach { device ->
-                        val nickname = deviceNicknames[device.address]
-                        val displayName = nickname ?: device.name ?: device.address
-                        val isThisConnected = device.address == connectedDeviceAddress
+                // ── Quick toggles (one panel of rows) ──
+                Column(
+                    modifier = Modifier
+                        .padding(top = cq * 2.8f)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(cq * 5.6f))
+                        .background(c.card)
+                        .border(1.dp, c.line, RoundedCornerShape(cq * 5.6f))
+                ) {
+                    val toggles = listOf(
+                        QuickToggle("Tap to click", "Tap to left-click", tapToClick, onTapToClickChange, SettingsIcons.tap),
+                        QuickToggle("Natural scroll", "Follows your finger", naturalScroll, onNaturalScrollChange, SettingsIcons.scroll),
+                        QuickToggle("Haptics", "Vibrate on touch", hapticsEnabled, onHapticsChange, SettingsIcons.haptics),
+                        QuickToggle("Touch ripple", "Show where you touch", rippleEnabled, onRippleChange, SettingsIcons.ripple)
+                    )
+                    toggles.forEachIndexed { i, q ->
+                        if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+                        val iconBg by animateColorAsState(if (q.on) c.grnTint else c.chip, tween(200), label = "qib")
+                        val iconInk by animateColorAsState(if (q.on) c.grn else c.soft, tween(200), label = "qii")
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onOpenDeviceManager() }
-                                .padding(vertical = 15.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { q.onChange(!q.on) }
+                                .padding(horizontal = cq * 4.2f, vertical = cq * 3.8f),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(displayName, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                if (isThisConnected) Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(ok))
-                                Text(if (isThisConnected) "Connected" else "Paired", fontSize = 13.5.sp, color = mute)
+                            Box(
+                                modifier = Modifier
+                                    .size(cq * 10.4f)
+                                    .clip(RoundedCornerShape(cq * 3))
+                                    .background(iconBg),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                SettingsIcon(q.icon, iconInk, cq * 5f, 1.4f)
                             }
+                            Spacer(Modifier.width(cq * 3.4f))
+                            Column(Modifier.weight(1f)) {
+                                Text(q.title, color = c.ink, fontSize = cs(3.8f), fontWeight = FontWeight.SemiBold, letterSpacing = cs(3.8f * -0.01f))
+                                Text(q.sub, color = c.soft, fontSize = cs(3f), modifier = Modifier.padding(top = cq * 0.5f))
+                            }
+                            Spacer(Modifier.width(cq * 3.4f))
+                            SettingsSwitch(q.on, c, cq) { q.onChange(!q.on) }
                         }
-                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
                     }
                 }
 
-                Text(
-                    "+ Add new device", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink,
-                    modifier = Modifier.fillMaxWidth().clickable { onNavigateToPairingGuide() }.padding(vertical = 16.dp)
-                )
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
-
-                Text(
-                    "Reset to defaults", fontSize = 14.sp, color = mute, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().clickable {
-                        onSensitivityChange(1.3f); onTapToClickChange(true); onNaturalScrollChange(false)
-                        onHapticsChange(true); onRippleChange(true); onStatusBarAutoHideChange(true)
-                        onUiThemeChange("dark"); onTrackpadThemeChange("graphite")
-                    }.padding(vertical = 16.dp)
-                )
-
+                // ── Cursor speed ──
+                SettingsCaption("Cursor speed", c, cq, ::cs)
+                val minV = 0.5f; val maxV = 2.2f
+                val shown = sensitivity.coerceIn(minV, maxV)
+                fun presetName(v: Float) = if (v < 1.0f) "Precise" else if (v < 1.7f) "Balanced" else "Fast"
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier
+                        .padding(top = cq * 2.4f)
+                        .fillMaxWidth()
+                        .drawBehind { drawLine(c.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
+                        .padding(top = cq * 3.4f),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    Text("Version", fontSize = 15.sp, color = mute)
-                    Text(appVersion, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
+                    Column {
+                        Text(presetName(shown), color = c.ink, fontSize = cs(3.9f), fontWeight = FontWeight.SemiBold)
+                        Text("How far the cursor travels", color = c.soft, fontSize = cs(3.1f), modifier = Modifier.padding(top = cq * 0.8f))
+                    }
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            "%.1f".format(shown), color = c.ink, fontSize = cs(10f), fontWeight = FontWeight.Bold,
+                            letterSpacing = cs(10f * -0.04f), lineHeight = cs(10f)
+                        )
+                        Text(
+                            "×", color = c.faint, fontSize = cs(4f), fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = cq * 0.4f)
+                        )
+                    }
+                }
+                // Range slider: track fills to p% of its width; thumb centre travels between the ends
+                val p = (shown - minV) / (maxV - minV)
+                Box(
+                    modifier = Modifier
+                        .padding(top = cq * 3)
+                        .fillMaxWidth()
+                        .height(cq * 7)
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val r = (cq * 3.2f).toPx()
+                                fun update(x: Float) {
+                                    val f = ((x - r) / (size.width - 2 * r)).coerceIn(0f, 1f)
+                                    val raw = minV + f * (maxV - minV)
+                                    val snapped = (raw * 10).roundToInt() / 10f
+                                    onSensitivityChange(snapped.coerceIn(minV, maxV))
+                                }
+                                update(down.position.x); down.consume()
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    if (ev.changes.all { !it.pressed }) break
+                                    ev.changes.forEach { update(it.position.x); it.consume() }
+                                }
+                            }
+                        }
+                ) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val trackH = (cq * 1.4f).toPx()
+                        val cy = size.height / 2f
+                        val r = (cq * 3.2f).toPx()
+                        drawRoundRect(c.track, Offset(0f, cy - trackH / 2), Size(size.width, trackH), CornerRadius(9.dp.toPx()))
+                        val fillW = p * size.width
+                        if (fillW > 0f) {
+                            drawRoundRect(c.grn, Offset(0f, cy - trackH / 2), Size(fillW, trackH), CornerRadius(9.dp.toPx()))
+                        }
+                        val tx = r + p * (size.width - 2 * r)
+                        // shadow: 0 1.5cq 3cq -1cq rgba(0,0,0,.25)
+                        drawCircle(
+                            Brush.radialGradient(
+                                listOf(Color.Black.copy(alpha = 0.18f), Color.Transparent),
+                                center = Offset(tx, cy + (cq * 1.5f).toPx()), radius = r + (cq * 0.6f).toPx()
+                            ),
+                            radius = r + (cq * 0.6f).toPx(), center = Offset(tx, cy + (cq * 1.5f).toPx())
+                        )
+                        drawCircle(c.grn, r + 1.5.dp.toPx(), Offset(tx, cy))
+                        drawCircle(Color.White, r, Offset(tx, cy))
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("0.5×", color = c.faint, fontSize = cs(2.8f))
+                    Text("2.2×", color = c.faint, fontSize = cs(2.8f))
+                }
+                SegmentedControl(
+                    options = listOf("Precise", "Balanced", "Fast"),
+                    selected = presetName(shown),
+                    onSelect = { name -> onSensitivityChange(when (name) { "Precise" -> 0.7f; "Balanced" -> 1.3f; else -> 2.2f }) },
+                    c = c, cq = cq, cs = ::cs,
+                    modifier = Modifier.padding(top = cq * 3.4f).fillMaxWidth()
+                )
+
+                // ── Display ──
+                SettingsCaption("Display", c, cq, ::cs)
+                SettingsRows(c, cq) {
+                    listOf<@Composable () -> Unit>(
+                        {
+                            SettingsRow(c, cq, "Appearance", null, ::cs) {
+                                PillControl(
+                                    options = listOf("Dark" to "dark", "Light" to "light"),
+                                    selected = uiTheme,
+                                    onSelect = onUiThemeChange,
+                                    c = c, cq = cq, cs = ::cs
+                                )
+                            }
+                        },
+                        {
+                            SettingsRow(c, cq, "Keyboard theme", currentSkin.name, ::cs) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(cq * 2.4f)) {
+                                    KeyboardSkins.ALL.forEach { option ->
+                                        val isSel = keyboardSkin == option.id
+                                        val ring by animateColorAsState(if (isSel) c.grn else Color.Transparent, tween(150), label = "thr")
+                                        val (c1, c2) = when (option.id) {
+                                            "obsidian" -> Color(0xFF1E1E20) to Color(0xFFF26A3D)
+                                            "linen" -> Color(0xFFE8E2D8) to Color(0xFF1F3A5F)
+                                            else -> Color(0xFFD5D7DB) to Color(0xFF5B4A3B)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(cq * 8)
+                                                .drawBehind {
+                                                    // outline 1.5px, offset 1cq
+                                                    drawCircle(ring, radius = size.width / 2 + (cq * 1).toPx() + 0.75.dp.toPx(), style = Stroke(1.5.dp.toPx()))
+                                                }
+                                                .clip(CircleShape)
+                                                .drawBehind {
+                                                    drawRect(c1)
+                                                    val half = Path().apply {
+                                                        moveTo(size.width, 0f); lineTo(size.width, size.height); lineTo(0f, size.height); close()
+                                                    }
+                                                    drawPath(half, c2)
+                                                    drawCircle(Color.Black.copy(alpha = 0.08f), radius = size.width / 2 - 0.5.dp.toPx(), style = Stroke(1.dp.toPx()))
+                                                }
+                                                .clickable { onKeyboardSkinChange(option.id) }
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            SettingsRow(c, cq, "Auto-hide status bar", "Fades after 3 seconds", ::cs) {
+                                SettingsSwitch(statusBarAutoHide, c, cq) { onStatusBarAutoHideChange(!statusBarAutoHide) }
+                            }
+                        }
+                    )
+                }
+
+                // ── Gestures ──
+                SettingsCaption("Gestures", c, cq, ::cs)
+                var gTab by remember { mutableStateOf(1) }
+                Row(
+                    modifier = Modifier.padding(top = cq * 3.4f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(cq * 1.6f)
+                ) {
+                    listOf(1 to "One", 2 to "Two", 3 to "Three", 4 to "Four").forEach { (n, label) ->
+                        val on = gTab == n
+                        val fg = if (on) c.grn else c.soft
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .then(if (on) Modifier.selectedChipShadow(cq * 2.6f, c) else Modifier)
+                                .clip(RoundedCornerShape(cq * 2.6f))
+                                .background(if (on) c.selBg else c.chip)
+                                .clickable { gTab = n }
+                                .padding(vertical = cq * 2.4f),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(cq * 0.6f)) {
+                                repeat(n) { Box(Modifier.size(cq * 1.3f).clip(CircleShape).background(fg)) }
+                            }
+                            Spacer(Modifier.width(cq * 1.2f))
+                            Text(label, color = fg, fontSize = cs(3.1f), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                val entries = gestureData["$gTab-finger"] ?: emptyList()
+                SettingsRows(c, cq) {
+                    entries.map { e ->
+                        @Composable {
+                            SettingsRow(c, cq, e.gesture, null, ::cs) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(cq * 1.4f)) {
+                                    Text(e.action, color = c.soft, fontSize = cs(3.4f), maxLines = 1)
+                                    SettingsIcon(listOf("M9 6l6 6-6 6"), c.faint, cq * 3.6f, 2f)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Footer ──
+                Row(
+                    modifier = Modifier
+                        .padding(top = cq * 8)
+                        .fillMaxWidth()
+                        .padding(start = cq * 1, end = cq * 1, top = cq * 2),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Reset to defaults", color = c.ink, fontSize = cs(3.4f), fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(cq * 2.8f))
+                            .border(1.dp, c.line, RoundedCornerShape(cq * 2.8f))
+                            .clickable {
+                                onSensitivityChange(1.3f); onTapToClickChange(true); onNaturalScrollChange(false)
+                                onHapticsChange(true); onRippleChange(true); onStatusBarAutoHideChange(true)
+                                onUiThemeChange("dark"); onKeyboardSkinChange("grey")
+                            }
+                            .padding(horizontal = cq * 4, vertical = cq * 2.4f)
+                    )
+                    Text("Mouskey $appVersion", color = c.faint, fontSize = cs(3f))
                 }
             }
         }
     }
 }
 
+private data class SettingsPalette(
+    val bg: Color, val card: Color, val ink: Color, val soft: Color, val faint: Color,
+    val line: Color, val track: Color, val chip: Color, val selBg: Color, val selRing: Color,
+    val ok: Color, val grn: Color, val grnTint: Color,
+    // connection scene art
+    val lid: Color, val scr: Color, val win: Color, val base: Color, val phone: Color, val phoneScr: Color,
+    val cursorFill: Color, val cursorStroke: Color
+) {
+    companion object {
+        val Light = SettingsPalette(
+            bg = Color(0xFFF7F6F3), card = Color(0xFFFFFFFF), ink = Color(0xFF141416), soft = Color(0xFF6F6F73), faint = Color(0xFFA3A3A8),
+            line = Color(0xFFECEBE7), track = Color(0xFFE3E2DE), chip = Color(0xFFEFEDE8), selBg = Color(0xFFFFFFFF), selRing = Color(0xFFE3E1DB),
+            ok = Color(0xFF22A45D), grn = Color(0xFF27A162), grnTint = Color(0xFFE7F4EC),
+            lid = Color(0xFF141416), scr = Color(0xFFF7F6F3), win = Color(0xFFECEBE7), base = Color(0xFFD9D7D1), phone = Color(0xFF141416), phoneScr = Color(0xFF2A2A2D),
+            cursorFill = Color(0xFF141416), cursorStroke = Color.White
+        )
+        val Dark = SettingsPalette(
+            bg = Color(0xFF0C0C0E), card = Color(0xFF161618), ink = Color(0xFFF2F2F4), soft = Color(0xFF9A9AA0), faint = Color(0xFF6C6C72),
+            line = Color(0xFF242427), track = Color(0xFF2E2E33), chip = Color(0xFF1F1F22), selBg = Color(0xFF2A2A2E), selRing = Color(0xFF34343A),
+            ok = Color(0xFF22A45D), grn = Color(0xFF2FB36D), grnTint = Color(0xFF173524),
+            lid = Color(0xFF3A3A3F), scr = Color(0xFF101012), win = Color(0xFF232327), base = Color(0xFF2C2C30), phone = Color(0xFF3A3A3F), phoneScr = Color(0xFF1A1A1D),
+            cursorFill = Color(0xFFF2F2F4), cursorStroke = Color(0xFF101012)
+        )
+    }
+}
+
+private data class QuickToggle(
+    val title: String, val sub: String, val on: Boolean, val onChange: (Boolean) -> Unit, val icon: List<String>
+)
+
+private object SettingsIcons {
+    val tap = listOf("M9 11V5.5a1.5 1.5 0 0 1 3 0V12M12 11.5V9.5a1.5 1.5 0 0 1 3 0V12M15 12v-1a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L3.6 15a1.5 1.5 0 0 1 2.4-1.8L9 16V9")
+    val scroll = listOf("M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4")
+    val haptics = listOf("M10 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M4 8v8M20 8v8")
+    val ripple = listOf(
+        "M14.5 12a2.5 2.5 0 1 1-5 0a2.5 2.5 0 1 1 5 0z",
+        "M18.5 12a6.5 6.5 0 1 1-13 0a6.5 6.5 0 1 1 13 0z",
+        "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z"
+    )
+}
+
+/** Stroked SVG path icon on a 24×24 grid. */
 @Composable
-private fun SettingsToggleRow(
-    title: String,
-    description: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    ink: Color,
-    mute: Color,
-    line: Color,
-    acc: Color,
-    trackBg: Color,
-    thumbCol: Color
+private fun SettingsIcon(paths: List<String>, tint: Color, size: Dp, strokeWidth: Float) {
+    val parsed = remember(paths) { paths.map { PathParser().parsePathString(it).toPath() } }
+    Canvas(Modifier.size(size)) {
+        val s = this.size.minDimension / 24f
+        scale(s, s, pivot = Offset.Zero) {
+            parsed.forEach { drawPath(it, tint, style = Stroke(strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)) }
+        }
+    }
+}
+
+@Composable
+private fun SettingsCaption(text: String, c: SettingsPalette, cq: Dp, cs: (Float) -> TextUnit) {
+    Text(
+        text.uppercase(), color = c.faint, fontSize = cs(2.8f), fontWeight = FontWeight.SemiBold,
+        letterSpacing = cs(2.8f * 0.14f), modifier = Modifier.padding(top = cq * 8)
+    )
+}
+
+/** Rows with a top rule, dividers between rows and a bottom rule after the last one. */
+@Composable
+private fun SettingsRows(c: SettingsPalette, cq: Dp, rows: () -> List<@Composable () -> Unit>) {
+    Column(
+        modifier = Modifier
+            .padding(top = cq * 2.4f)
+            .fillMaxWidth()
+    ) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+        rows().forEachIndexed { i, row ->
+            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+            row()
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+    }
+}
+
+@Composable
+private fun SettingsRow(c: SettingsPalette, cq: Dp, title: String, sub: String?, cs: (Float) -> TextUnit, trailing: @Composable () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = cq * 3.6f),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = c.ink, fontSize = cs(3.8f), fontWeight = FontWeight.SemiBold)
+            if (sub != null) Text(sub, color = c.soft, fontSize = cs(3.1f), modifier = Modifier.padding(top = cq * 0.7f))
+        }
+        Spacer(Modifier.width(cq * 3))
+        trailing()
+    }
+}
+
+@Composable
+private fun SettingsSwitch(on: Boolean, c: SettingsPalette, cq: Dp, onToggle: () -> Unit) {
+    val bgCol by animateColorAsState(if (on) c.grn else c.track, tween(200), label = "swb")
+    val knob by animateDpAsState(if (on) cq * 5 else 0.dp, tween(200), label = "swk")
+    Box(
+        modifier = Modifier
+            .size(width = cq * 12, height = cq * 7)
+            .clip(RoundedCornerShape(50))
+            .background(bgCol)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onToggle() }
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(start = cq * 0.8f, top = cq * 0.8f)
+                .offset(x = knob)
+                .size(cq * 5.4f)
+                .shadow(1.5.dp, CircleShape)
+                .background(Color.White, CircleShape)
+        )
+    }
+}
+
+/** Selected-pill look: 0 1px 2px rgba(0,0,0,.06), 0 0 0 1px ring. */
+private fun Modifier.selectedChipShadow(radius: Dp, c: SettingsPalette): Modifier = this
+    .shadow(1.dp, RoundedCornerShape(radius), ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.06f))
+    .border(1.dp, c.selRing, RoundedCornerShape(radius))
+
+@Composable
+private fun SegmentedControl(
+    options: List<String>, selected: String, onSelect: (String) -> Unit,
+    c: SettingsPalette, cq: Dp, cs: (Float) -> TextUnit, modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(cq * 3.2f))
+            .background(c.chip)
+            .padding(cq * 1)
+    ) {
+        options.forEach { opt ->
+            val on = opt == selected
+            val fg by animateColorAsState(if (on) c.grn else c.soft, tween(150), label = "sgf")
+            val bgc by animateColorAsState(if (on) c.selBg else Color.Transparent, tween(150), label = "sgb")
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .then(if (on) Modifier.selectedChipShadow(cq * 2.4f, c) else Modifier)
+                    .clip(RoundedCornerShape(cq * 2.4f))
+                    .background(bgc)
+                    .clickable { onSelect(opt) }
+                    .padding(vertical = cq * 2.3f),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(opt, color = fg, fontSize = cs(3.3f), fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PillControl(
+    options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit,
+    c: SettingsPalette, cq: Dp, cs: (Float) -> TextUnit
 ) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 15.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .clip(RoundedCornerShape(cq * 2.8f))
+            .background(c.chip)
+            .padding(cq * 0.8f)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = ink)
-            Text(description, fontSize = 13.sp, color = mute, lineHeight = 18.sp, modifier = Modifier.padding(top = 1.dp))
-        }
-        Spacer(modifier = Modifier.width(16.dp))
-        val toggleBg by animateColorAsState(if (checked) acc else trackBg, tween(300), label = "tb")
-        val thumbOff by animateFloatAsState(
-            if (checked) 1f else 0f,
-            spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow), label = "to"
-        )
-        Box(
-            modifier = Modifier
-                .width(40.dp)
-                .height(24.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(toggleBg)
-                .clickable { onCheckedChange(!checked) }
-        ) {
+        options.forEach { (label, value) ->
+            val on = value == selected
             Box(
                 modifier = Modifier
-                    .padding(3.dp)
-                    .size(18.dp)
-                    .offset(x = (16 * thumbOff).dp)
-                    .clip(CircleShape)
-                    .background(if (checked) thumbCol else Color.White)
-            )
+                    .then(if (on) Modifier.selectedChipShadow(cq * 2.1f, c) else Modifier)
+                    .clip(RoundedCornerShape(cq * 2.1f))
+                    .background(if (on) c.selBg else Color.Transparent)
+                    .clickable { onSelect(value) }
+                    .padding(horizontal = cq * 3.6f, vertical = cq * 1.8f),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(label, color = if (on) c.grn else c.soft, fontSize = cs(3.2f), fontWeight = FontWeight.SemiBold)
+            }
         }
     }
-    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(line))
+}
+
+/** Status dot with the CSS `pulse` ring: 2.4s ease-out, 0→spread at 70%. */
+@Composable
+private fun PulseDot(color: Color, size: Dp, spread: Dp, animate: Boolean) {
+    val t = if (animate) {
+        val inf = rememberInfiniteTransition(label = "pulse")
+        inf.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "pt").value
+    } else 0f
+    val easeOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
+    val (k, a) = if (t <= 0.7f) {
+        val f = easeOut.transform(t / 0.7f); f to (0.6f * (1 - f))
+    } else 0f to 0f
+    Canvas(Modifier.size(size)) {
+        val r = this.size.minDimension / 2
+        if (animate && a > 0f) drawCircle(color.copy(alpha = a), r + spread.toPx() * k)
+        drawCircle(color, r)
+    }
+}
+
+/** Keyframe sampler: per-segment easing, like CSS animation-timing-function. */
+private fun kf(p: Float, ts: FloatArray, vs: FloatArray, ease: Easing): Float {
+    if (p <= ts.first()) return vs.first()
+    for (i in 0 until ts.size - 1) {
+        if (p <= ts[i + 1]) {
+            val span = ts[i + 1] - ts[i]
+            val f = if (span <= 0f) 1f else (p - ts[i]) / span
+            return vs[i] + (vs[i + 1] - vs[i]) * ease.transform(f)
+        }
+    }
+    return vs.last()
+}
+
+/** Laptop + phone scene from the design (viewBox 240×132), 6s loop. */
+@Composable
+private fun ConnectionScene(c: SettingsPalette, isConnected: Boolean, modifier: Modifier) {
+    val inf = rememberInfiniteTransition(label = "scene")
+    val p by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "sp")
+    val ease = CubicBezierEasing(0.45f, 0f, 0.25f, 1f)
+    val easeOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
+    val moveT = floatArrayOf(0f, .22f, .30f, .55f, .63f, .85f, 1f)
+    val cursorPath = remember { PathParser().parsePathString("M0 0l9 6.3-4.1.7 2.3 4.4-1.7.9-2.3-4.4L0 11z").toPath() }
+    val basePath = remember { PathParser().parsePathString("M32 98h160l-8 9H40z").toPath() }
+
+    Canvas(modifier) {
+        val s = size.width / 240f
+        scale(s, s, pivot = Offset.Zero) {
+            // laptop
+            drawRoundRect(c.lid, Offset(46f, 8f), Size(132f, 86f), CornerRadius(7f))
+            drawRoundRect(c.scr, Offset(53f, 15f), Size(118f, 72f), CornerRadius(3f))
+            drawRoundRect(c.win, Offset(63f, 25f), Size(56f, 34f), CornerRadius(2.5f))
+            drawRoundRect(c.win, Offset(125f, 25f), Size(36f, 14f), CornerRadius(2.5f))
+            drawRoundRect(c.win, Offset(125f, 45f), Size(36f, 14f), CornerRadius(2.5f))
+            drawRoundRect(c.win, Offset(63f, 65f), Size(98f, 12f), CornerRadius(2.5f))
+            drawPath(basePath, c.base)
+
+            // cursor
+            val cx = kf(p, moveT, floatArrayOf(150f, 88f, 88f, 140f, 140f, 110f, 150f), ease)
+            val cy = kf(p, moveT, floatArrayOf(70f, 40f, 40f, 30f, 30f, 70f, 70f), ease)
+            translate(cx, cy) {
+                drawPath(cursorPath, c.cursorFill)
+                drawPath(cursorPath, c.cursorStroke, style = Stroke(1f, join = StrokeJoin.Round))
+            }
+
+            // phone
+            drawRoundRect(c.phone, Offset(196f, 58f), Size(34f, 62f), CornerRadius(7f))
+            drawRoundRect(c.phoneScr, Offset(199.5f, 62f), Size(27f, 54f), CornerRadius(4.5f))
+
+            // tap ring (ease-out, transform about its own centre)
+            val tapOpacity = kf(p, floatArrayOf(0f, .22f, .24f, .31f, .55f, .57f, .64f, 1f), floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f), easeOut)
+            val tT = floatArrayOf(0f, .22f, .31f, .55f, .64f, 1f)
+            val tx = kf(p, tT, floatArrayOf(-5f, -5f, -5f, 3f, 3f, 0f), easeOut)
+            val ty = kf(p, tT, floatArrayOf(-4f, -4f, -4f, -8f, -8f, 0f), easeOut)
+            val ts = kf(p, tT, floatArrayOf(.4f, .4f, 1.6f, .4f, 1.6f, 1f), easeOut)
+            if (tapOpacity > 0f) {
+                drawCircle(
+                    c.ok.copy(alpha = tapOpacity), radius = 6f * ts, center = Offset(213f + tx, 89f + ty),
+                    style = Stroke(1.4f * ts)
+                )
+            }
+
+            // finger dot
+            val dx = kf(p, moveT, floatArrayOf(4f, -5f, -5f, 3f, 3f, -1f, 4f), ease)
+            val dy = kf(p, moveT, floatArrayOf(6f, -4f, -4f, -8f, -8f, 6f, 6f), ease)
+            drawCircle(Color.White, 2.2f, Offset(213f + dx, 89f + dy))
+        }
+    }
 }
 
 
@@ -7067,7 +7383,8 @@ fun KeyboardScreen(
     doubleSpaceForPeriod: Boolean = true,
     keySoundEnabled: Boolean = false,
     layout: KeyboardLayout = KeyboardLayouts.FULL_QWERTY,
-    theme: AppThemeColors = AppThemes.Midnight
+    theme: AppThemeColors = AppThemes.Midnight,
+    skin: KeyboardSkin = KeyboardSkins.Grey
 ) {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
@@ -7088,10 +7405,13 @@ fun KeyboardScreen(
     var lastSpaceTime by remember { mutableStateOf(0L) }
     var shortcutsOverlayModifier by remember { mutableStateOf("") }
 
-    val surfaceBg = theme.surface
-    val keyGap = layout.keyGapDp.dp
-    val rowGap = layout.rowGapDp.dp
-    val accent = theme.accent
+    // Visible gap is equal both ways: the row gap plus each key's bottom edge
+    // reads as the vertical gap, so the horizontal gap includes the edge too.
+    val edge = 2.dp
+    val rowGap = 3.dp
+    val keyGap = rowGap + edge
+    val keyRadius = 6.dp
+    val brandFont = remember { FontFamily(Font(R.font.caveat_bold)) }
 
     fun doHaptic() {
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -7103,95 +7423,99 @@ fun KeyboardScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(surfaceBg)
-            .windowInsetsPadding(WindowInsets.systemBars)
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalArrangement = Arrangement.spacedBy(rowGap)
-        ) {
-            for ((rowIdx, row) in layout.rows.withIndex()) {
-                val totalUnits = row.sumOf { it.widthUnits.toDouble() }.toFloat()
-                val isMediaRow = row.any { it.isMediaRow }
-                val rowWeight = if (isMediaRow) 0.7f else 1f
+    // inSlab = media key drawn inside the shared function-row slab
+    @Composable
+    fun KeyCell(key: KeyDef, isMediaRow: Boolean, inSlab: Boolean, modifier: Modifier) {
+        val isModActive = key.type == KeyType.MODIFIER && heldModifiers.contains(key.modByte)
+        val isShiftKey = key.type == KeyType.SHIFT
+        val isFnKey = key.type == KeyType.FN
+        val isCapsKey = key.label == "Caps"
+        val isCapsLocked = isCapsKey && shiftState == ShiftState.CAPS_LOCK
+        val isBackspace = key.hid == KeyboardReportSender.KEY_BACKSPACE
+        val isSpace = key.hid == KeyboardReportSender.KEY_SPACE
+        val isConsumer = key.type == KeyType.CONSUMER
+        val isVolumeKey = isConsumer && (key.consumerCode == 0x00E9 || key.consumerCode == 0x00EA)
+        val isEsc = isMediaRow && key.hid == KeyboardReportSender.KEY_ESCAPE
+        val isDel = isMediaRow && key.hid == KeyboardReportSender.KEY_DELETE
+        val isArrow = key.hid == KeyboardReportSender.KEY_ARROW_LEFT || key.hid == KeyboardReportSender.KEY_ARROW_RIGHT ||
+            key.hid == KeyboardReportSender.KEY_ARROW_UP || key.hid == KeyboardReportSender.KEY_ARROW_DOWN
+        val isMod = key.type != KeyType.CHAR || isBackspace || isArrow ||
+            key.hid == KeyboardReportSender.KEY_TAB || key.hid == KeyboardReportSender.KEY_CAPS_LOCK ||
+            key.hid == KeyboardReportSender.KEY_ENTER
+        val isLit = isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) || isCapsLocked
 
-                Row(
-                    modifier = Modifier.fillMaxWidth().weight(rowWeight),
-                    horizontalArrangement = Arrangement.spacedBy(keyGap)
-                ) {
-                    for (key in row) {
-                        val weight = key.widthUnits / totalUnits
-                        val isModActive = key.type == KeyType.MODIFIER && heldModifiers.contains(key.modByte)
-                        val isShiftKey = key.type == KeyType.SHIFT
-                        val isFnKey = key.type == KeyType.FN
-                        val isSpecialKey = key.type != KeyType.CHAR || key.widthUnits > 1.1f
-                        val isCapsKey = key.label == "Caps"
-                        val isCapsLocked = isCapsKey && shiftState == ShiftState.CAPS_LOCK
-                        val isBackspace = key.hid == KeyboardReportSender.KEY_BACKSPACE
-                        val isSpace = key.hid == KeyboardReportSender.KEY_SPACE
-                        val isConsumer = key.type == KeyType.CONSUMER
-                        val isVolumeKey = isConsumer && (key.consumerCode == 0x00E9 || key.consumerCode == 0x00EA)
+        val showFnLabel = fnHeld && key.fnLabel.isNotEmpty()
+        val displayLabel = when {
+            showFnLabel -> key.fnLabel
+            key.type == KeyType.MODIFIER || key.type == KeyType.SHIFT || key.type == KeyType.ACTION || key.type == KeyType.FN -> key.label
+            isConsumer && key.label.isEmpty() -> ""
+            key.label.isEmpty() -> ""
+            isShifted -> key.shiftLabel
+            else -> key.label
+        }
+        val iconName = when {
+            showFnLabel -> ""
+            isConsumer -> key.icon
+            isBackspace -> "back"
+            isShiftKey -> "shift"
+            key.hid == KeyboardReportSender.KEY_ARROW_LEFT -> "left"
+            key.hid == KeyboardReportSender.KEY_ARROW_RIGHT -> "right"
+            key.hid == KeyboardReportSender.KEY_ARROW_UP -> "up"
+            key.hid == KeyboardReportSender.KEY_ARROW_DOWN -> "down"
+            key.type == KeyType.ACTION && key.actionId == "trackpad" -> "mouse"
+            else -> ""
+        }
 
-                        val showFnLabel = fnHeld && key.fnLabel.isNotEmpty()
-                        val displayLabel = when {
-                            showFnLabel -> key.fnLabel
-                            key.type == KeyType.MODIFIER || key.type == KeyType.SHIFT || key.type == KeyType.ACTION || key.type == KeyType.FN -> key.label
-                            isConsumer && key.label.isEmpty() -> ""
-                            key.label.isEmpty() -> ""
-                            isShifted -> key.shiftLabel
-                            else -> key.label
-                        }
+        var pressed by remember { mutableStateOf(false) }
+        val pressOffset by animateDpAsState(
+            targetValue = if (pressed && !inSlab) edge else 0.dp,
+            animationSpec = tween(if (pressed) 30 else 90), label = "kp"
+        )
 
-                        var pressed by remember { mutableStateOf(false) }
-                        val animScale by animateFloatAsState(
-                            targetValue = if (pressed) 0.95f else 1f,
-                            animationSpec = if (pressed) tween(15) else spring(dampingRatio = 0.4f, stiffness = Spring.StiffnessMedium),
-                            label = "s"
-                        )
-                        val animAlpha by animateFloatAsState(
-                            targetValue = if (pressed) 0.7f else 1f,
-                            animationSpec = tween(if (pressed) 15 else 150), label = "a"
-                        )
+        // Face / edge colours per key kind
+        val faceTop: Color; val faceBottom: Color; val edgeColor: Color; val highlight: Color; val ring: Color
+        when {
+            inSlab -> { faceTop = Color.Transparent; faceBottom = Color.Transparent; edgeColor = Color.Transparent; highlight = Color.Transparent; ring = Color.Transparent }
+            isEsc -> { faceTop = skin.escTop; faceBottom = skin.escBottom; edgeColor = skin.escEdge; highlight = if (skin.escTop != skin.escBottom) Color(0x40FFFFFF) else Color.Transparent; ring = Color.Transparent }
+            isDel -> { faceTop = skin.slabTop; faceBottom = skin.slabBottom; edgeColor = skin.slabEdge; highlight = skin.slabLine; ring = skin.slabBorder }
+            isMod -> { faceTop = skin.modTop; faceBottom = skin.modBottom; edgeColor = skin.modEdge; highlight = skin.modHighlight; ring = skin.keyBorder }
+            else -> { faceTop = skin.keyTop; faceBottom = skin.keyBottom; edgeColor = skin.keyEdge; highlight = skin.keyHighlight; ring = skin.keyBorder }
+        }
+        val contentColor = when {
+            isLit && skin.litInk != null -> skin.litInk
+            inSlab || isDel -> skin.icon
+            isEsc -> skin.escInk
+            isMod -> skin.modInk
+            else -> skin.ink
+        }
 
-                        val glassBg = theme.keySurface
-                        val glassBgSpecial = theme.keySpecialSurface
-                        val glassBorder = theme.keyBorder
-                        val accentBorder = theme.accentBorder
-
-                        val bg by animateColorAsState(
-                            targetValue = when {
-                                isShiftKey && shiftState == ShiftState.CAPS_LOCK -> accent.copy(alpha = 0.35f)
-                                isShiftKey && shiftState == ShiftState.SHIFTED -> accent.copy(alpha = 0.2f)
-                                isModActive -> accent.copy(alpha = 0.25f)
-                                isFnKey && fnHeld -> accent.copy(alpha = 0.25f)
-                                pressed -> glassBg.copy(alpha = glassBg.alpha * 1.8f)
-                                isSpecialKey || isMediaRow || isConsumer || isFnKey -> glassBgSpecial
-                                else -> glassBg
-                            },
-                            animationSpec = tween(100), label = "bg"
-                        )
-                        val borderColor by animateColorAsState(
-                            targetValue = when {
-                                isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accentBorder
-                                pressed -> glassBorder.copy(alpha = glassBorder.alpha * 1.5f)
-                                else -> glassBorder
-                            },
-                            animationSpec = tween(80), label = "brd"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .weight(weight)
-                                .fillMaxHeight()
-                                .scale(animScale)
-                                .alpha(animAlpha)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(bg)
-                                .border(0.5.dp, borderColor, RoundedCornerShape(6.dp))
-                                .pointerInput(key.label + key.hid + key.actionId + key.modByte + key.consumerCode + key.icon) {
+        Box(
+            modifier = modifier
+                .fillMaxHeight()
+                .drawBehind {
+                    val r = CornerRadius(keyRadius.toPx())
+                    val e = edge.toPx()
+                    val off = pressOffset.toPx()
+                    if (inSlab) {
+                        if (pressed) drawRoundRect(skin.capPressed, cornerRadius = r)
+                        return@drawBehind
+                    }
+                    val faceH = size.height - e
+                    if (off < e) drawRoundRect(edgeColor, topLeft = Offset(0f, e), size = Size(size.width, faceH), cornerRadius = r)
+                    if (highlight != Color.Transparent) {
+                        drawRoundRect(highlight, topLeft = Offset(0f, off), size = Size(size.width, faceH), cornerRadius = r)
+                    }
+                    val hl = if (highlight != Color.Transparent) 1.dp.toPx() else 0f
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(listOf(faceTop, faceBottom), startY = off, endY = off + faceH),
+                        topLeft = Offset(0f, off + hl), size = Size(size.width, faceH - hl), cornerRadius = r
+                    )
+                    if (ring != Color.Transparent) {
+                        drawRoundRect(ring, topLeft = Offset(0f, off), size = Size(size.width, faceH), cornerRadius = r, style = Stroke(1.dp.toPx()))
+                    }
+                    if (pressed) drawRoundRect(Color.Black.copy(alpha = 0.1f), topLeft = Offset(0f, off), size = Size(size.width, faceH), cornerRadius = r)
+                }
+                .pointerInput(key.label + key.hid + key.actionId + key.modByte + key.consumerCode + key.icon) {
                                     awaitEachGesture {
                                         awaitFirstDown(requireUnconsumed = false).also { it.consume() }
                                         pressed = true
@@ -7324,55 +7648,111 @@ fun KeyboardScreen(
                                             }
                                         }
                                     }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Render icon or text
-                            if (key.icon.isNotEmpty() && !showFnLabel) {
-                                MediaKeyIcon(
-                                    icon = key.icon,
-                                    tint = theme.textSecondary,
-                                    size = if (isMediaRow) 14f else 12f
-                                )
-                            } else {
-                                Text(
-                                    text = displayLabel,
-                                    color = when {
-                                        isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accent.copy(alpha = 0.85f)
-                                        isSpecialKey || isMediaRow || isConsumer || isFnKey -> theme.textSecondary
-                                        else -> theme.textPrimary
-                                    },
-                                    fontSize = when {
-                                        isMediaRow || showFnLabel -> 10.sp
-                                        key.label.length > 2 -> 10.sp
-                                        isSpecialKey -> 11.sp
-                                        else -> 12.sp
-                                    },
-                                    fontWeight = FontWeight.Medium,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                            // Active modifier bottom-edge glow
-                            if (isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld)) {
-                                Canvas(modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.BottomCenter)) {
+                                }
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = if (inSlab) 0.dp else edge)
+                    .offset(y = pressOffset),
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    iconName.isNotEmpty() -> SkinIcon(iconName, contentColor, if (inSlab) 19.dp else 17.dp)
+                    isSpace -> Text(
+                        "mouskey", color = skin.brand, fontSize = 19.sp,
+                        fontFamily = brandFont, letterSpacing = 0.4.sp
+                    )
+                    else -> Text(
+                        text = displayLabel,
+                        color = contentColor,
+                        fontSize = when {
+                            showFnLabel || isMediaRow || isMod -> 11.5.sp
+                            else -> 15.sp
+                        },
+                        fontWeight = if (isMod || isMediaRow) FontWeight.SemiBold else FontWeight.Medium,
+                        letterSpacing = if (isMod || isMediaRow) 0.2.sp else 0.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1
+                    )
+                }
+                if (isLit) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 6.dp, end = 7.dp)
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(skin.escBottom)
+                    )
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(skin.bgTop, skin.bgBottom)))
+            .windowInsetsPadding(WindowInsets.systemBars)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 3.dp),
+            verticalArrangement = Arrangement.spacedBy(rowGap)
+        ) {
+            for (row in layout.rows) {
+                val isMediaRow = row.any { it.isMediaRow }
+                val rowWeight = if (isMediaRow) 0.7f else 1f
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(rowWeight),
+                    horizontalArrangement = Arrangement.spacedBy(keyGap)
+                ) {
+                    if (isMediaRow) {
+                        // Esc · [ media slab ] · Del
+                        val slabKeys = row.filter { it.type == KeyType.CONSUMER }
+                        val head = row.takeWhile { it.type != KeyType.CONSUMER }
+                        val tail = row.drop(head.size + slabKeys.size)
+                        head.forEach { KeyCell(it, true, false, Modifier.weight(it.widthUnits)) }
+                        Row(
+                            modifier = Modifier
+                                .weight(slabKeys.sumOf { it.widthUnits.toDouble() }.toFloat())
+                                .fillMaxHeight()
+                                .drawBehind {
+                                    val r = CornerRadius(keyRadius.toPx())
+                                    val e = edge.toPx()
+                                    val faceH = size.height - e
+                                    drawRoundRect(skin.slabEdge, topLeft = Offset(0f, e), size = Size(size.width, faceH), cornerRadius = r)
+                                    drawRoundRect(skin.slabLine, size = Size(size.width, faceH), cornerRadius = r)
                                     drawRoundRect(
-                                        brush = Brush.horizontalGradient(
-                                            listOf(Color.Transparent, accent.copy(alpha = 0.6f), Color.Transparent)
-                                        ),
-                                        cornerRadius = CornerRadius(2f)
+                                        brush = Brush.verticalGradient(listOf(skin.slabTop, skin.slabBottom), endY = faceH),
+                                        topLeft = Offset(0f, 1.dp.toPx()), size = Size(size.width, faceH - 1.dp.toPx()), cornerRadius = r
+                                    )
+                                    if (skin.slabBorder != Color.Transparent) {
+                                        drawRoundRect(skin.slabBorder, size = Size(size.width, faceH), cornerRadius = r, style = Stroke(1.dp.toPx()))
+                                    }
+                                }
+                                .padding(start = 6.dp, end = 6.dp, bottom = edge),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            slabKeys.forEachIndexed { i, k ->
+                                // Group separators: after mic, after volume-up
+                                if (i == 5 || i == 8) {
+                                    Box(
+                                        Modifier
+                                            .padding(horizontal = 2.dp)
+                                            .width(1.dp)
+                                            .fillMaxHeight(0.42f)
+                                            .background(skin.sep)
                                     )
                                 }
+                                KeyCell(k, true, true, Modifier.weight(k.widthUnits))
                             }
-                            if (isCapsLocked) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(4.dp)
-                                        .size(4.dp)
-                                        .clip(CircleShape)
-                                        .background(accent)
-                                )
-                            }
+                        }
+                        tail.forEach { KeyCell(it, true, false, Modifier.weight(it.widthUnits)) }
+                    } else {
+                        for (key in row) {
+                            KeyCell(key, false, false, Modifier.weight(key.widthUnits))
                         }
                     }
                 }
@@ -7383,6 +7763,62 @@ fun KeyboardScreen(
             isVisible = shortcutsOverlayModifier.isNotEmpty(),
             theme = theme
         )
+    }
+}
+
+/** Line icons for the full keyboard, drawn on a 24x24 grid. */
+@Composable
+fun SkinIcon(name: String, tint: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val u = this.size.minDimension / 24f
+        fun p(x: Float, y: Float) = Offset(x * u, y * u)
+        val st = Stroke(width = 1.7f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
+            drawLine(tint, p(x1, y1), p(x2, y2), strokeWidth = st.width, cap = StrokeCap.Round)
+        fun poly(vararg pts: Float, close: Boolean = true) {
+            val path = Path().apply {
+                moveTo(pts[0] * u, pts[1] * u)
+                var i = 2
+                while (i < pts.size) { lineTo(pts[i] * u, pts[i + 1] * u); i += 2 }
+                if (close) close()
+            }
+            drawPath(path, tint, style = st)
+        }
+        fun arc(cx: Float, cy: Float, r: Float, start: Float, sweep: Float) =
+            drawArc(tint, start, sweep, false, p(cx - r, cy - r), Size(2 * r * u, 2 * r * u), style = st)
+        fun speaker() = poly(4f, 9f, 7f, 9f, 12f, 5f, 12f, 19f, 7f, 15f, 4f, 15f)
+
+        when (name) {
+            "bright_down" -> {
+                drawCircle(tint, 3f * u, p(12f, 12f), style = st)
+                line(12f, 5f, 12f, 6.5f); line(12f, 17.5f, 12f, 19f); line(5f, 12f, 6.5f, 12f); line(17.5f, 12f, 19f, 12f)
+                line(7.1f, 7.1f, 8.1f, 8.1f); line(15.9f, 15.9f, 16.9f, 16.9f); line(7.1f, 16.9f, 8.1f, 15.9f); line(15.9f, 8.1f, 16.9f, 7.1f)
+            }
+            "bright_up" -> {
+                drawCircle(tint, 4f * u, p(12f, 12f), style = st)
+                line(12f, 2f, 12f, 5f); line(12f, 19f, 12f, 22f); line(2f, 12f, 5f, 12f); line(19f, 12f, 22f, 12f)
+                line(4.9f, 4.9f, 7f, 7f); line(17f, 17f, 19.1f, 19.1f); line(4.9f, 19.1f, 7f, 17f); line(17f, 7f, 19.1f, 4.9f)
+            }
+            "grid" -> for (y in listOf(6f, 12f, 18f)) for (x in listOf(6f, 12f, 18f)) drawCircle(tint, 1.5f * u, p(x, y))
+            "search" -> { drawCircle(tint, 6f * u, p(11f, 11f), style = st); line(20f, 20f, 15.5f, 15.5f) }
+            "mic" -> {
+                drawRoundRect(tint, p(9f, 3f), Size(6f * u, 11f * u), CornerRadius(3f * u), style = st)
+                arc(12f, 11f, 7f, 0f, 180f); line(12f, 18f, 12f, 21f)
+            }
+            "mute" -> { speaker(); line(16f, 9.5f, 21f, 14.5f); line(21f, 9.5f, 16f, 14.5f) }
+            "vol_down" -> { speaker(); arc(13.76f, 12f, 3f, -41.8f, 83.6f) }
+            "vol_up" -> { speaker(); arc(13.35f, 12f, 4f, -48.6f, 97.2f); arc(12.69f, 12f, 8f, -43.4f, 86.8f) }
+            "skip_back" -> { line(6f, 5f, 6f, 19f); poly(19f, 5f, 9f, 12f, 19f, 19f) }
+            "play_pause" -> { poly(5f, 5f, 13f, 12f, 5f, 19f); line(16f, 6f, 16f, 18f); line(20f, 6f, 20f, 18f) }
+            "skip_fwd" -> { line(18f, 5f, 18f, 19f); poly(5f, 5f, 15f, 12f, 5f, 19f) }
+            "mouse" -> { drawRoundRect(tint, p(7f, 3f), Size(10f * u, 18f * u), CornerRadius(5f * u), style = st); line(12f, 7f, 12f, 10f) }
+            "back" -> { poly(9f, 5f, 20f, 5f, 20f, 19f, 9f, 19f, 3f, 12f); line(12f, 9.5f, 17f, 14.5f); line(17f, 9.5f, 12f, 14.5f) }
+            "shift" -> poly(12f, 4f, 20f, 12f, 16f, 12f, 16f, 19f, 8f, 19f, 8f, 12f, 4f, 12f)
+            "left" -> { line(19f, 12f, 5f, 12f); poly(11f, 6f, 5f, 12f, 11f, 18f, close = false) }
+            "right" -> { line(5f, 12f, 19f, 12f); poly(13f, 6f, 19f, 12f, 13f, 18f, close = false) }
+            "up" -> { line(12f, 19f, 12f, 5f); poly(6f, 11f, 12f, 5f, 18f, 11f, close = false) }
+            "down" -> { line(12f, 5f, 12f, 19f); poly(6f, 13f, 12f, 19f, 18f, 13f, close = false) }
+        }
     }
 }
 
@@ -7398,6 +7834,7 @@ fun CompactKeyboardScreen(
     doubleSpaceForPeriod: Boolean = true,
     keySoundEnabled: Boolean = false,
     theme: AppThemeColors = AppThemes.Midnight,
+    skin: KeyboardSkin = KeyboardSkins.Grey,
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
@@ -7412,8 +7849,13 @@ fun CompactKeyboardScreen(
     var popupOffset by remember { mutableStateOf(Offset.Zero) }
 
     val activeLayout = if (fnHeld) KeyboardLayouts.COMPACT_SYMBOLS else KeyboardLayouts.COMPACT_QWERTY
-    val accent = theme.accent
-    val surfaceBg = theme.surface
+
+    // Visible gap is equal both ways: row gap + each key's bottom edge = key gap
+    val edge = 2.dp
+    val rowGap = 1.dp
+    val keyGap = rowGap + edge
+    val keyRadius = 6.dp
+    val brandFont = remember { FontFamily(Font(R.font.caveat_bold)) }
 
     fun doHaptic() {
         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -7422,84 +7864,93 @@ fun CompactKeyboardScreen(
         if (keySoundEnabled) view.playSoundEffect(SoundEffectConstants.CLICK)
     }
 
-    Box(modifier = modifier.fillMaxSize().background(surfaceBg)) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 2.dp, vertical = 2.dp),
-            verticalArrangement = Arrangement.spacedBy(activeLayout.rowGapDp.dp)
-        ) {
-            for (row in activeLayout.rows) {
-                val totalUnits = row.sumOf { it.widthUnits.toDouble() }.toFloat()
-                val isMediaRow = row.any { it.isMediaRow }
-                val rowWeight = if (isMediaRow) 0.6f else 1f
+    // inSlab = media key drawn inside the shared function-row slab
+    @Composable
+    fun KeyCell(key: KeyDef, isMediaRow: Boolean, inSlab: Boolean, modifier: Modifier) {
+        val isModActive = key.type == KeyType.MODIFIER && heldModifiers.contains(key.modByte)
+        val isShiftKey = key.type == KeyType.SHIFT
+        val isFnKey = key.type == KeyType.FN
+        val isBackspace = key.hid == KeyboardReportSender.KEY_BACKSPACE
+        val isSpace = key.hid == KeyboardReportSender.KEY_SPACE
+        val hasAlt = key.altLabel.isNotEmpty()
+        val isConsumer = key.type == KeyType.CONSUMER
+        val isVolumeKey = isConsumer && (key.consumerCode == 0x00E9 || key.consumerCode == 0x00EA)
+        val showFnLabel = fnHeld && key.fnLabel.isNotEmpty()
+        val isEsc = isMediaRow && key.hid == KeyboardReportSender.KEY_ESCAPE
+        val isArrow = key.hid == KeyboardReportSender.KEY_ARROW_LEFT || key.hid == KeyboardReportSender.KEY_ARROW_RIGHT ||
+            key.hid == KeyboardReportSender.KEY_ARROW_UP || key.hid == KeyboardReportSender.KEY_ARROW_DOWN
+        val isMod = key.type != KeyType.CHAR || isBackspace || isArrow ||
+            key.hid == KeyboardReportSender.KEY_ENTER || key.hid == KeyboardReportSender.KEY_TAB
+        val isLit = isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld)
 
-                Row(
-                    modifier = Modifier.fillMaxWidth().weight(rowWeight),
-                    horizontalArrangement = Arrangement.spacedBy(activeLayout.keyGapDp.dp)
-                ) {
-                    for (key in row) {
-                        val weight = key.widthUnits / totalUnits
-                        val isModActive = key.type == KeyType.MODIFIER && heldModifiers.contains(key.modByte)
-                        val isShiftKey = key.type == KeyType.SHIFT
-                        val isFnKey = key.type == KeyType.FN
-                        val isSpecialKey = key.type != KeyType.CHAR || key.widthUnits > 1.1f
-                        val isBackspace = key.hid == KeyboardReportSender.KEY_BACKSPACE
-                        val isSpace = key.hid == KeyboardReportSender.KEY_SPACE
-                        val hasAlt = key.altLabel.isNotEmpty()
-                        val isConsumer = key.type == KeyType.CONSUMER
-                        val isVolumeKey = isConsumer && (key.consumerCode == 0x00E9 || key.consumerCode == 0x00EA)
-                        val showFnLabel = fnHeld && key.fnLabel.isNotEmpty()
+        val displayLabel = when {
+            showFnLabel -> key.fnLabel
+            key.type == KeyType.MODIFIER || key.type == KeyType.SHIFT || key.type == KeyType.FN -> key.label
+            isConsumer && key.label.isEmpty() -> ""
+            key.label.isEmpty() -> ""
+            isShifted -> key.shiftLabel
+            else -> key.label
+        }
+        val iconName = when {
+            showFnLabel -> ""
+            isConsumer -> key.icon
+            isBackspace -> "back"
+            isShiftKey -> "shift"
+            key.hid == KeyboardReportSender.KEY_ARROW_LEFT -> "left"
+            key.hid == KeyboardReportSender.KEY_ARROW_RIGHT -> "right"
+            key.hid == KeyboardReportSender.KEY_ARROW_UP -> "up"
+            key.hid == KeyboardReportSender.KEY_ARROW_DOWN -> "down"
+            else -> ""
+        }
 
-                        val displayLabel = when {
-                            showFnLabel -> key.fnLabel
-                            key.type == KeyType.MODIFIER || key.type == KeyType.SHIFT || key.type == KeyType.FN -> key.label
-                            isConsumer && key.label.isEmpty() -> ""
-                            key.label.isEmpty() -> ""
-                            isShifted -> key.shiftLabel
-                            else -> key.label
-                        }
+        var pressed by remember { mutableStateOf(false) }
+        val pressOffset by animateDpAsState(
+            targetValue = if (pressed && !inSlab) edge * 0.7f else 0.dp,
+            animationSpec = tween(if (pressed) 30 else 90), label = "kp"
+        )
 
-                        var pressed by remember { mutableStateOf(false) }
-                        val animScale by animateFloatAsState(
-                            targetValue = if (pressed) 0.93f else 1f,
-                            animationSpec = if (pressed) tween(15) else spring(dampingRatio = 0.4f, stiffness = Spring.StiffnessMedium),
-                            label = "s"
-                        )
+        val faceTop: Color; val faceBottom: Color; val edgeColor: Color; val highlight: Color; val ring: Color
+        when {
+            inSlab -> { faceTop = Color.Transparent; faceBottom = Color.Transparent; edgeColor = Color.Transparent; highlight = Color.Transparent; ring = Color.Transparent }
+            isEsc -> { faceTop = skin.escTop; faceBottom = skin.escBottom; edgeColor = skin.escEdge; highlight = Color(0x33FFFFFF); ring = Color.Transparent }
+            isMod -> { faceTop = skin.modTop; faceBottom = skin.modBottom; edgeColor = skin.modEdge; highlight = skin.modHighlight; ring = skin.keyBorder }
+            else -> { faceTop = skin.keyTop; faceBottom = skin.keyBottom; edgeColor = skin.keyEdge; highlight = skin.keyHighlight; ring = skin.keyBorder }
+        }
+        val contentColor = when {
+            isLit && skin.litInk != null -> skin.litInk
+            inSlab -> skin.splitIcon
+            isEsc -> skin.escInk
+            isMod -> skin.modInk
+            else -> skin.ink
+        }
 
-                        val glassBg = theme.keySurface
-                        val glassBgSpecial = theme.keySpecialSurface
-                        val glassBorder = theme.keyBorder
-                        val accentBorder = theme.accentBorder
-
-                        val bg by animateColorAsState(
-                            targetValue = when {
-                                isShiftKey && shiftState == ShiftState.CAPS_LOCK -> accent.copy(alpha = 0.35f)
-                                isShiftKey && shiftState == ShiftState.SHIFTED -> accent.copy(alpha = 0.2f)
-                                isModActive -> accent.copy(alpha = 0.25f)
-                                isFnKey && fnHeld -> accent.copy(alpha = 0.25f)
-                                pressed -> glassBg.copy(alpha = glassBg.alpha * 1.8f)
-                                isSpecialKey || isFnKey || isMediaRow || isConsumer -> glassBgSpecial
-                                else -> glassBg
-                            },
-                            animationSpec = tween(100), label = "bg"
-                        )
-                        val borderColor by animateColorAsState(
-                            targetValue = when {
-                                isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accentBorder
-                                pressed -> glassBorder.copy(alpha = glassBorder.alpha * 1.5f)
-                                else -> glassBorder
-                            },
-                            animationSpec = tween(80), label = "brd"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .weight(weight)
-                                .fillMaxHeight()
-                                .scale(animScale)
-                                .clip(RoundedCornerShape(5.dp))
-                                .background(bg)
-                                .border(0.5.dp, borderColor, RoundedCornerShape(5.dp))
-                                .pointerInput(key.label + key.hid + key.modByte + fnHeld) {
+        Box(
+            modifier = modifier
+                .fillMaxHeight()
+                .drawBehind {
+                    val r = CornerRadius(keyRadius.toPx())
+                    val e = edge.toPx()
+                    val off = pressOffset.toPx()
+                    if (inSlab) {
+                        if (pressed) drawRoundRect(skin.capPressed, cornerRadius = r)
+                        return@drawBehind
+                    }
+                    val faceH = size.height - e
+                    drawRoundRect(edgeColor, topLeft = Offset(0f, e), size = Size(size.width, faceH), cornerRadius = r)
+                    if (highlight != Color.Transparent) {
+                        drawRoundRect(highlight, topLeft = Offset(0f, off), size = Size(size.width, faceH), cornerRadius = r)
+                    }
+                    val hl = if (highlight != Color.Transparent) 1.dp.toPx() else 0f
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(listOf(faceTop, faceBottom), startY = off, endY = off + faceH),
+                        topLeft = Offset(0f, off + hl), size = Size(size.width, faceH - hl), cornerRadius = r
+                    )
+                    if (ring != Color.Transparent) {
+                        drawRoundRect(ring, topLeft = Offset(0f, off), size = Size(size.width, faceH), cornerRadius = r, style = Stroke(1.dp.toPx()))
+                    }
+                    if (pressed) drawRoundRect(Color.Black.copy(alpha = 0.08f), topLeft = Offset(0f, off), size = Size(size.width, faceH), cornerRadius = r)
+                }
+                .pointerInput(key.label + key.hid + key.modByte + fnHeld) {
                                     awaitEachGesture {
                                         awaitFirstDown(requireUnconsumed = false).also { it.consume() }
                                         pressed = true
@@ -7661,54 +8112,117 @@ fun CompactKeyboardScreen(
                                             }
                                         }
                                     }
-                                },
-                            contentAlignment = Alignment.Center
+                                }
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = if (inSlab) 0.dp else edge)
+                    .offset(y = pressOffset),
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    iconName.isNotEmpty() -> SkinIcon(iconName, contentColor, if (inSlab) 17.dp else 18.dp)
+                    isSpace -> Text(
+                        "mouskey", color = skin.brand, fontSize = 18.sp,
+                        fontFamily = brandFont, letterSpacing = 0.3.sp
+                    )
+                    else -> Text(
+                        text = displayLabel,
+                        color = contentColor,
+                        fontSize = when {
+                            showFnLabel || isMediaRow || isMod -> 12.sp
+                            displayLabel.length > 1 -> 12.sp
+                            else -> 16.sp
+                        },
+                        fontWeight = if (isMod || isMediaRow) FontWeight.SemiBold else FontWeight.Medium,
+                        letterSpacing = if (isMod || isMediaRow) 0.2.sp else 0.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1
+                    )
+                }
+                // Alt character hint (top-right corner)
+                if (hasAlt && !fnHeld) {
+                    Text(
+                        text = key.altLabel,
+                        color = skin.sub,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 4.dp)
+                    )
+                }
+                if (isLit) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 5.dp, end = 6.dp)
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(skin.escBottom)
+                    )
+                }
+            }
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(start = 3.dp, end = 3.dp, top = 0.dp, bottom = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(rowGap)
+        ) {
+            for (row in activeLayout.rows) {
+                val isMediaRow = row.any { it.isMediaRow }
+                val rowWeight = if (isMediaRow) 0.6f else 1f
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(rowWeight)
+                        .then(if (isMediaRow) Modifier.padding(bottom = 4.dp) else Modifier),
+                    horizontalArrangement = Arrangement.spacedBy(keyGap)
+                ) {
+                    if (isMediaRow) {
+                        // Esc · [ media slab ]
+                        val slabKeys = row.filter { it.type == KeyType.CONSUMER }
+                        val head = row.takeWhile { it.type != KeyType.CONSUMER }
+                        val tail = row.drop(head.size + slabKeys.size)
+                        head.forEach { KeyCell(it, true, false, Modifier.weight(it.widthUnits)) }
+                        Row(
+                            modifier = Modifier
+                                .weight(slabKeys.sumOf { it.widthUnits.toDouble() }.toFloat())
+                                .fillMaxHeight()
+                                .drawBehind {
+                                    val r = CornerRadius(keyRadius.toPx())
+                                    val e = edge.toPx()
+                                    val faceH = size.height - e
+                                    drawRoundRect(skin.splitSlabEdge, topLeft = Offset(0f, e), size = Size(size.width, faceH), cornerRadius = r)
+                                    drawRoundRect(skin.splitSlabLine, size = Size(size.width, faceH), cornerRadius = r)
+                                    drawRoundRect(
+                                        brush = Brush.verticalGradient(listOf(skin.splitSlabTop, skin.splitSlabBottom), endY = faceH),
+                                        topLeft = Offset(0f, 1.dp.toPx()), size = Size(size.width, faceH - 1.dp.toPx()), cornerRadius = r
+                                    )
+                                }
+                                .padding(start = 3.dp, end = 3.dp, bottom = edge),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Key label — icon for media keys, text otherwise
-                            if (key.icon.isNotEmpty() && !showFnLabel) {
-                                MediaKeyIcon(
-                                    icon = key.icon,
-                                    tint = theme.textSecondary,
-                                    size = 14f
-                                )
-                            } else {
-                                Text(
-                                    text = displayLabel,
-                                    color = when {
-                                        isModActive || (isShiftKey && isShifted) || (isFnKey && fnHeld) -> accent.copy(alpha = 0.85f)
-                                        isMediaRow || isConsumer -> theme.textSecondary
-                                        isSpecialKey || isFnKey -> theme.textSecondary
-                                        else -> theme.textPrimary
-                                    },
-                                    fontSize = when {
-                                        key.label.length > 3 -> 8.sp
-                                        key.label.length > 1 -> 9.sp
-                                        else -> 11.sp
-                                    },
-                                    fontWeight = FontWeight.Medium,
-                                    textAlign = TextAlign.Center
-                                )
+                            slabKeys.forEachIndexed { i, k ->
+                                // Group separators: after brightness, after volume
+                                if (i == 2 || i == 5) {
+                                    Box(
+                                        Modifier
+                                            .padding(horizontal = 2.dp)
+                                            .width(1.dp)
+                                            .fillMaxHeight(0.42f)
+                                            .background(skin.sep)
+                                    )
+                                }
+                                KeyCell(k, true, true, Modifier.weight(k.widthUnits))
                             }
-                            // Alt character hint (top-right corner)
-                            if (hasAlt && !fnHeld) {
-                                Text(
-                                    text = key.altLabel,
-                                    color = Color(0xFF666680),
-                                    fontSize = 7.sp,
-                                    modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)
-                                )
-                            }
-                            // Caps Lock dot
-                            if (key.label == "Caps" && shiftState == ShiftState.CAPS_LOCK) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(3.dp)
-                                        .size(3.dp)
-                                        .clip(CircleShape)
-                                        .background(accent)
-                                )
-                            }
+                        }
+                        tail.forEach { KeyCell(it, true, false, Modifier.weight(it.widthUnits)) }
+                    } else {
+                        for (key in row) {
+                            KeyCell(key, false, false, Modifier.weight(key.widthUnits))
                         }
                     }
                 }
@@ -7727,12 +8241,12 @@ fun CompactKeyboardScreen(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .background(accent.copy(alpha = 0.9f))
+                        .background(skin.escBottom)
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = pk.altLabel,
-                        color = Color.White,
+                        color = skin.escInk,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -7750,12 +8264,13 @@ fun CompactKeyboardScreen(
 fun SplitScreen(
     trackpadContent: @Composable (Modifier) -> Unit,
     keyboardContent: @Composable (Modifier) -> Unit,
-    theme: AppThemeColors = AppThemes.Midnight
+    theme: AppThemeColors = AppThemes.Midnight,
+    skin: KeyboardSkin = KeyboardSkins.Grey
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(theme.surface)
+            .background(skin.bgBottom)
             .windowInsetsPadding(WindowInsets.systemBars)
     ) {
         // Top: Trackpad (65%)
@@ -7765,38 +8280,20 @@ fun SplitScreen(
                 .fillMaxWidth()
         )
 
-        // Divider with drag handle
+        // Drag handle
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(12.dp),
+                .height(18.dp),
             contentAlignment = Alignment.Center
         ) {
-            // Divider line
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(0.5.dp)
-                    .background(theme.divider)
+                    .width(44.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(skin.bar.copy(alpha = skin.bar.alpha * 0.7f))
             )
-            // Drag handle (3 short horizontal lines)
-            Column(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(theme.surface)
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                repeat(3) {
-                    Box(
-                        modifier = Modifier
-                            .width(16.dp)
-                            .height(1.dp)
-                            .background(theme.divider)
-                    )
-                }
-            }
         }
 
         // Bottom: Compact Keyboard (35%)
@@ -7805,6 +8302,51 @@ fun SplitScreen(
                 .weight(0.35f)
                 .fillMaxWidth()
         )
+    }
+}
+
+/** Rounded trackpad surface (visual only; touch handling stays with the caller). */
+@Composable
+fun TrackpadPadSurface(
+    skin: KeyboardSkin,
+    modifier: Modifier = Modifier,
+    showBrand: Boolean = false,
+    hint: String? = null
+) {
+    val brandFont = remember { FontFamily(Font(R.font.caveat_bold)) }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(20.dp))
+            .background(skin.pad)
+            .drawBehind {
+                // Soft inner shadow along the top edge
+                drawRect(
+                    Brush.verticalGradient(listOf(skin.padShade, Color.Transparent), endY = 18.dp.toPx())
+                )
+            }
+            .border(1.5.dp, skin.padLine, RoundedCornerShape(20.dp))
+    ) {
+        if (showBrand) {
+            Text(
+                text = "mouskey",
+                color = skin.brand,
+                fontSize = 22.sp,
+                fontFamily = brandFont,
+                // Below the connection pill row so the two never overlap
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp)
+            )
+        }
+        if (hint != null) {
+            Text(
+                text = hint,
+                color = skin.hint,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 2.sp,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp)
+            )
+        }
     }
 }
 
@@ -7817,6 +8359,7 @@ fun ModePopup(
     onOpenSettings: (() -> Unit)? = null,
     showTrigger: Boolean = true,
     dropDown: Boolean = false,
+    triggerSkin: KeyboardSkin? = null,
     modifier: Modifier = Modifier
 ) {
     val accent = Color(0xFF7C6AF6)
@@ -7827,15 +8370,15 @@ fun ModePopup(
     )
 
     @Composable
-    fun ModeIcon(mode: AppScreen, isActive: Boolean) {
+    fun ModeIcon(mode: AppScreen, isActive: Boolean, tint: Color = Color.White) {
         Canvas(modifier = Modifier.size(20.dp)) {
             val w = size.width; val h = size.height
-            val iconColor = if (isActive) Color.White else Color.White.copy(alpha = 0.45f)
+            val iconColor = if (isActive) tint else tint.copy(alpha = 0.45f)
             val stroke = if (isActive) 2f else 1.5f
             when (mode) {
                 AppScreen.TRACKPAD -> {
                     drawRoundRect(iconColor, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.84f), CornerRadius(w * 0.12f), style = Stroke(stroke))
-                    if (isActive) drawCircle(Color.White, w * 0.06f, Offset(w * 0.55f, h * 0.45f))
+                    if (isActive) drawCircle(iconColor, w * 0.06f, Offset(w * 0.55f, h * 0.45f))
                 }
                 AppScreen.KEYBOARD -> {
                     drawRoundRect(iconColor, Offset(w * 0.1f, h * 0.15f), Size(w * 0.8f, h * 0.7f), CornerRadius(w * 0.08f), style = Stroke(stroke))
@@ -7958,16 +8501,38 @@ fun ModePopup(
             ),
             exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.85f)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(alpha = 0.07f))
-                    .border(0.5.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-                    .clickable { onToggle() },
-                contentAlignment = Alignment.Center
-            ) {
-                ModeIcon(currentMode, true)
+            if (triggerSkin != null) {
+                // Slab-style button matching the keyboard skin
+                Box(
+                    modifier = Modifier
+                        .size(width = 52.dp, height = 44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .drawBehind {
+                            val e = 1.7.dp.toPx()
+                            drawRect(triggerSkin.splitSlabEdge)
+                            drawRect(triggerSkin.splitSlabLine, size = Size(size.width, size.height - e))
+                            drawRect(
+                                Brush.verticalGradient(listOf(triggerSkin.splitSlabTop, triggerSkin.splitSlabBottom)),
+                                topLeft = Offset(0f, 1.dp.toPx()), size = Size(size.width, size.height - e - 1.dp.toPx())
+                            )
+                        }
+                        .clickable { onToggle() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    ModeIcon(currentMode, true, triggerSkin.splitIcon)
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.07f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .clickable { onToggle() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    ModeIcon(currentMode, true)
+                }
             }
         }
     }
