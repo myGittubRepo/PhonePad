@@ -154,6 +154,7 @@ import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Add
@@ -1415,10 +1416,11 @@ class MainActivity : ComponentActivity() {
                                             onRenameDevice = { addr, name -> saveDeviceNickname(addr, name) },
                                             onForgetDevice = { device -> forgetDevice(device) },
                                             onDeviceSelected = { device -> connectToDevice(device) },
+                                            // Pair new hosts from the phone's own Bluetooth settings
                                             onNavigateToPairingGuide = {
-                                                showDeviceManager = false
-                                                showSettings = false
-                                                currentScreen = AppScreen.CONNECT
+                                                try {
+                                                    startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
+                                                } catch (_: Exception) {}
                                             },
                                             onDismiss = { showDeviceManager = false }
                                         )
@@ -5579,40 +5581,6 @@ fun TrackpadScreen(
             }
         }
 
-        // Status bar (top) — glass effect with blur
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .alpha(statusBarAlpha)
-                .padding(start = 24.dp, end = 26.dp, top = 22.dp, bottom = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Connection status pill (left)
-            ConnectionStatusPill(
-                connectionStatus = connectionStatus,
-                isConnected = isConnected,
-                connectedHostName = connectedHostName,
-                onClick = {
-                    if (!isConnected) showReconnectSheet = true
-                },
-                onLongClick = {
-                    onToggleDeviceManager()
-                },
-                ink = skin.ink
-            )
-
-            // Battery % (right)
-            if (batteryPercent >= 0) {
-                Text(
-                    text = "$batteryPercent%",
-                    color = skin.ink.copy(alpha = 0.5f),
-                    fontSize = 11.sp,
-                    letterSpacing = 0.5.sp
-                )
-            }
-        }
-
         // Settings and Device Manager overlays are hosted by the activity so
         // they're reachable from every mode (opened via the mode switcher).
 
@@ -6525,13 +6493,45 @@ private fun DeviceManagerOverlay(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = onNavigateToPairingGuide,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2B2D6E)),
-                modifier = Modifier.fillMaxWidth()
+            Spacer(modifier = Modifier.height(20.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.White.copy(alpha = 0.07f), Color.White.copy(alpha = 0.035f))
+                        )
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.09f), RoundedCornerShape(16.dp))
+                    .clickable { onNavigateToPairingGuide() }
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("+ Add New Device", fontSize = 14.sp)
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF7C6AF6).copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = null,
+                        tint = Color(0xFFA99BFF),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    "Add new device",
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.1.sp
+                )
             }
         }
 
@@ -8333,8 +8333,7 @@ fun TrackpadPadSurface(
                 color = skin.brand,
                 fontSize = 22.sp,
                 fontFamily = brandFont,
-                // Below the connection pill row so the two never overlap
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp)
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 22.dp)
             )
         }
         if (hint != null) {
